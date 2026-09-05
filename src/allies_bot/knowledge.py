@@ -303,6 +303,11 @@ class KnowledgeBase:
     ) -> tuple[str, list[dict[str, str | None]]]:
         history = history or []
         retrieval_query = "\n".join([message.content for message in history[-4:]] + [question])
+        if any(
+            term in question.lower()
+            for term in ("brand new", "character creation", "pick", "select", "choose", "learn")
+        ):
+            retrieval_query += "\ncharacter creation Order eligibility Spiritual Effect versus Song learn"
         sources = self.search(retrieval_query)
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
@@ -327,7 +332,12 @@ class KnowledgeBase:
                         "distinct source page that contains an explicit matching rule; do not omit "
                         "a page merely because another page describes a similar effect. Label any "
                         "remaining inference separately, and do not claim a complete list unless "
-                        "the excerpts establish completeness. "
+                        "the excerpts establish completeness. For character-building questions, "
+                        "separate Spiritual Effects from Songs and verify that the character's "
+                        "Order or discipline can learn each recommendation. Do not recommend a "
+                        "Song to a non-Minstrel, and do not treat a Minstrel-only option as a "
+                        "general Ministering Spirit option. If eligibility is not explicit in the "
+                        "excerpts, say that it is unverified instead of assuming it. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

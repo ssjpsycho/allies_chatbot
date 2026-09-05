@@ -339,7 +339,7 @@ class KnowledgeBase:
         if character_creation:
             retrieval_query += (
                 "\ncharacter creation select 3 Spiritual Effects first effects different Families "
-                "Order eligibility Spiritual Effect versus Song learn"
+                "Progression 1 Tier 1 Order eligibility Spiritual Effect versus Song learn"
             )
         sources = self.search(retrieval_query)
         if character_creation and not explicit_enemy_request:
@@ -393,6 +393,13 @@ class KnowledgeBase:
                         "unless the user explicitly asks for restrictions or comparisons. Do not "
                         "mention Songs, Minstrels, or excluded options in the final answer unless "
                         "the user explicitly asks about them. "
+                        "For a brand-new character, use the Family progression table and recommend "
+                        "only the first Tier 1 Effect in each selected Family. Never substitute a "
+                        "later effect for the first one: in the Judgment Family, Gavel of Judgment "
+                        "is the first progression entry and Burning Coal is later, so Burning Coal "
+                        "is not a valid brand-new-character recommendation. If the first Effect's "
+                        "name or eligibility is not present in the excerpts, say it is unverified "
+                        "rather than recommending a later Effect. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

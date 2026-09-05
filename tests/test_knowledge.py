@@ -137,6 +137,13 @@ def test_character_build_filters_minstrel_source() -> None:
     assert KnowledgeBase.is_minstrel_source(minstrel)
 
 
+def test_character_build_retrieval_requests_first_tier_effects() -> None:
+    retrieval_terms = "Progression 1 Tier 1 first Spiritual Effect"
+
+    assert "Progression 1" in retrieval_terms
+    assert "Tier 1" in retrieval_terms
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

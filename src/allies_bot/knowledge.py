@@ -322,7 +322,10 @@ class KnowledgeBase:
             term in question.lower() for term in ("unholy", "corrupt", "corruption", "enemy", "evil")
         )
         if character_creation:
-            retrieval_query += "\ncharacter creation Order eligibility Spiritual Effect versus Song learn"
+            retrieval_query += (
+                "\ncharacter creation select 3 Spiritual Effects first effects different Families "
+                "Order eligibility Spiritual Effect versus Song learn"
+            )
         sources = self.search(retrieval_query)
         if character_creation and not explicit_enemy_request:
             sources = [source for source in sources if not self.is_enemy_source(source)]
@@ -354,7 +357,12 @@ class KnowledgeBase:
                         "Order or discipline can learn each recommendation. Do not recommend a "
                         "Song to a non-Minstrel, and do not treat a Minstrel-only option as a "
                         "general Ministering Spirit option. If eligibility is not explicit in the "
-                        "excerpts, say that it is unverified instead of assuming it. "
+                        "excerpts, say that it is unverified instead of assuming it. The rules state "
+                        "that a new Ministering Spirit selects 3 Spiritual Effects, which are the "
+                        "first Spiritual Effect in 3 different Families; do not say they select only "
+                        "one. Recommend three eligible Effects when the supplied rules support them, "
+                        "and identify their Families. Do not use Markdown tables because Discord does "
+                        "not render them reliably; use headings and bullet lists instead. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

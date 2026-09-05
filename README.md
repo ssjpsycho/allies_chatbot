@@ -73,6 +73,7 @@ Re-indexing updates the existing Qdrant collection using stable chunk IDs, so it
 - The bot accepts commands only in `ALLOWED_CHANNEL_IDS`; Discord permissions provide a second layer of control.
 - It combines semantic retrieval with exact-term retrieval, which helps named mechanics such as `Endurance`, `damage`, and `Stops` appear even when a question is phrased broadly.
 - For character-building questions, it checks Order and discipline eligibility and distinguishes Spiritual Effects from Songs before recommending options.
+- Character-building responses use Discord-compatible headings and bullets rather than Markdown tables.
 - Normal character-building answers exclude enemy and corruption pages; those sources are included only when the question explicitly asks about unholy, corrupted, enemy, or evil options.
 - It retrieves source excerpts before answering and includes source links when the material came from the wiki.
 - Do not place bot, OpenAI, Qdrant, or BookStack tokens in source control or Discord messages.

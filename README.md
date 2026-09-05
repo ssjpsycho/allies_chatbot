@@ -34,7 +34,7 @@ This bot answers Discord slash-command questions using only the Allies of Majest
    python3 -m allies_bot.bot
    ```
 
-7. In an allowed channel, run `/ask` and ask a question. The bot remembers the latest eight turns per server/channel/user in Qdrant, so follow-up questions can refer to earlier messages. Long answers are split across Discord messages; `/sources` shows the configured sources.
+7. In an allowed channel, run `/ask` and ask a question. The bot remembers the latest eight turns per server/channel/user in Qdrant, so follow-up questions can refer to earlier messages. Backend calls have timeouts and return a retry message if a service is unavailable. Long answers are split across Discord messages; `/sources` shows the configured sources.
 
 ## 3. Deploy to Railway
 

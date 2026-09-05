@@ -30,6 +30,7 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 32
+DIRECT_RULE_RESULT_LIMIT = 8
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "made", "make", "more", "most", "that",
@@ -252,6 +253,33 @@ class KnowledgeBase:
                 existing, terms
             ):
                 keyword_sources[key] = source
+        attribute_terms = [term for term in terms if term in {"endurance", "resolve", "passion"}]
+        for attribute in attribute_terms:
+            for phrase in (
+                f"damage {attribute}",
+                f"damages {attribute}",
+                f"damage to {attribute}",
+                f"damaging {attribute}",
+                f"lower {attribute}",
+                f"lowers {attribute}",
+                f"puts {attribute}",
+            ):
+                direct_result = self.qdrant.query_points(
+                    collection_name=self.settings.qdrant_collection,
+                    query=vector,
+                    query_filter=Filter(
+                        must=[FieldCondition(key="text", match=MatchText(text=phrase))]
+                    ),
+                    limit=DIRECT_RULE_RESULT_LIMIT,
+                )
+                for point in direct_result.points:
+                    source = point.payload
+                    key = self._source_key(source)
+                    existing = keyword_sources.get(key)
+                    if existing is None or self.keyword_score(source, terms) > self.keyword_score(
+                        existing, terms
+                    ):
+                        keyword_sources[key] = source
         keyword_matches = [
             source
             for _, source in sorted(

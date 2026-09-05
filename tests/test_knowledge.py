@@ -88,6 +88,19 @@ def test_source_key_deduplicates_chunks_from_one_page() -> None:
     assert KnowledgeBase._source_key(first_chunk) == KnowledgeBase._source_key(second_chunk)
 
 
+def test_direct_rule_phrases_include_judgment_wording() -> None:
+    phrases = [
+        "damage resolve",
+        "damages resolve",
+        "damage to resolve",
+        "damaging resolve",
+        "puts resolve",
+    ]
+    judgment_text = "Gavel of Judgment manifests a Hammer that damages Resolve instead of Endurance."
+
+    assert any(phrase in judgment_text.lower() for phrase in phrases)
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

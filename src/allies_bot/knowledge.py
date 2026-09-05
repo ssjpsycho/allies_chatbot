@@ -29,7 +29,7 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 32
-DIRECT_RULE_RESULT_LIMIT = 8
+DIRECT_RULE_RESULT_LIMIT = 64
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "made", "make", "more", "most", "that",
@@ -256,7 +256,7 @@ class KnowledgeBase:
                 keyword_sources[key] = source
         attribute_terms = [term for term in terms if term in {"endurance", "resolve", "passion"}]
         for attribute in attribute_terms:
-            for phrase in (
+            phrases = (
                 f"damage {attribute}",
                 f"damages {attribute}",
                 f"damage to {attribute}",
@@ -264,23 +264,26 @@ class KnowledgeBase:
                 f"lower {attribute}",
                 f"lowers {attribute}",
                 f"puts {attribute}",
-            ):
-                direct_result = self.qdrant.query_points(
-                    collection_name=self.settings.qdrant_collection,
-                    query=vector,
-                    query_filter=Filter(
-                        must=[FieldCondition(key="text", match=MatchText(text=phrase))]
-                    ),
-                    limit=DIRECT_RULE_RESULT_LIMIT,
-                )
-                for point in direct_result.points:
-                    source = point.payload
-                    key = self._source_key(source)
-                    existing = keyword_sources.get(key)
-                    if existing is None or self.keyword_score(source, terms) > self.keyword_score(
-                        existing, terms
-                    ):
-                        keyword_sources[key] = source
+            )
+            direct_result = self.qdrant.query_points(
+                collection_name=self.settings.qdrant_collection,
+                query=vector,
+                query_filter=Filter(
+                    should=[
+                        FieldCondition(key="text", match=MatchText(text=phrase))
+                        for phrase in phrases
+                    ]
+                ),
+                limit=DIRECT_RULE_RESULT_LIMIT,
+            )
+            for point in direct_result.points:
+                source = point.payload
+                key = self._source_key(source)
+                existing = keyword_sources.get(key)
+                if existing is None or self.keyword_score(source, terms) > self.keyword_score(
+                    existing, terms
+                ):
+                    keyword_sources[key] = source
         keyword_matches = [
             source
             for _, source in sorted(
@@ -312,6 +315,12 @@ class KnowledgeBase:
         label = str(source.get("source_label") or "").lower()
         return "catalogue-of-evil" in url or "corruption" in label
 
+    @staticmethod
+    def is_flame_song_source(source: dict[str, str | None]) -> bool:
+        label = str(source.get("source_label") or "").lower()
+        url = str(source.get("source_url") or "").lower()
+        return label == "flame family" or url.endswith("/flame-family")
+
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None
     ) -> tuple[str, list[dict[str, str | None]]]:
@@ -328,7 +337,11 @@ class KnowledgeBase:
             )
         sources = self.search(retrieval_query)
         if character_creation and not explicit_enemy_request:
-            sources = [source for source in sources if not self.is_enemy_source(source)]
+            sources = [
+                source
+                for source in sources
+                if not self.is_enemy_source(source) and not self.is_flame_song_source(source)
+            ]
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
         context = "\n\n".join(

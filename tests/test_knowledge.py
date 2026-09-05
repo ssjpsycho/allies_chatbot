@@ -117,6 +117,16 @@ def test_character_build_filters_enemy_sources() -> None:
     assert not KnowledgeBase.is_enemy_source(judgment)
 
 
+def test_character_build_filters_flame_song_source() -> None:
+    flame = {
+        "source_label": "Flame Family",
+        "source_url": "https://wiki.test/books/character-creation-advancement/page/flame-family",
+        "text": "Flame Song damages Resolve.",
+    }
+
+    assert KnowledgeBase.is_flame_song_source(flame)
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

@@ -1,10 +1,11 @@
 import asyncio
+from datetime import UTC, datetime
 
 import discord
 from discord import app_commands
 
 from allies_bot.config import Settings
-from allies_bot.knowledge import KnowledgeBase
+from allies_bot.knowledge import ConversationMessage, KnowledgeBase
 from allies_bot.messages import split_for_discord
 
 
@@ -38,7 +39,20 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
         await interaction.response.send_message("This bot is not enabled in this channel.", ephemeral=True)
         return
     await interaction.response.defer(thinking=True)
-    answer, sources = await asyncio.to_thread(bot.knowledge.answer, question)
+    conversation_key = f"{interaction.guild_id or 0}:{interaction.channel_id}:{interaction.user.id}"
+    history = await asyncio.to_thread(bot.knowledge.load_conversation, conversation_key)
+    answer, sources = await asyncio.to_thread(bot.knowledge.answer, question, history)
+    now = datetime.now(UTC).isoformat()
+    await asyncio.to_thread(
+        bot.knowledge.save_conversation_message,
+        conversation_key,
+        ConversationMessage(role="user", content=question, created_at=now),
+    )
+    await asyncio.to_thread(
+        bot.knowledge.save_conversation_message,
+        conversation_key,
+        ConversationMessage(role="assistant", content=answer, created_at=now),
+    )
     source_lines = []
     for source in sources[:3]:
         label = str(source["source_label"])

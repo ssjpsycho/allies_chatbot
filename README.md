@@ -28,6 +28,8 @@ This bot answers Discord slash-command questions using only the Allies of Majest
    python3 -m allies_bot.ingest --wiki --epub
    ```
 
+   Re-run this command after adding or changing wiki pages so the Qdrant collection contains the current source text.
+
 6. Start the bot:
 
    ```sh

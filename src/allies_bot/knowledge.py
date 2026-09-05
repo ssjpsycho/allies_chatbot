@@ -292,8 +292,11 @@ class KnowledgeBase:
                         "lowers or damages an attribute, list only explicit damage, reduction, or "
                         "status rules for that attribute. Do not treat a resistance statistic, a "
                         "stat used to resist an effect, or a related stat as something that lowers "
-                        "the attribute. Label any remaining inference separately, and do not claim "
-                        "a complete list unless the excerpts establish completeness. "
+                        "the attribute. Inspect every supplied source excerpt and include each "
+                        "distinct source page that contains an explicit matching rule; do not omit "
+                        "a page merely because another page describes a similar effect. Label any "
+                        "remaining inference separately, and do not claim a complete list unless "
+                        "the excerpts establish completeness. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

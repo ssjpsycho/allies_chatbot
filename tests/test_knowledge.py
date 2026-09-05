@@ -127,6 +127,16 @@ def test_character_build_filters_flame_song_source() -> None:
     assert KnowledgeBase.is_flame_song_source(flame)
 
 
+def test_character_build_filters_minstrel_source() -> None:
+    minstrel = {
+        "source_label": "Minstrel-Ministering Spirit",
+        "source_url": "https://wiki.test/books/character-creation-advancement/page/minstrel-ministering-spirit",
+        "text": "Minstrels learn Songs.",
+    }
+
+    assert KnowledgeBase.is_minstrel_source(minstrel)
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)
@@ -145,6 +155,12 @@ def test_plain_text_for_discord_removes_markdown() -> None:
     assert "**" not in result
     assert "|" not in result
     assert "Rules: <https://wiki.test/rules>" in result
+
+
+def test_plain_text_for_discord_repairs_ordered_list_numbers() -> None:
+    result = plain_text_for_discord("1. First\n1. Second\n1. Third")
+
+    assert result == "1. First\n2. Second\n3. Third"
 
 
 def test_get_bookstack_retries_rate_limit(monkeypatch) -> None:

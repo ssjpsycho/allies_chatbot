@@ -28,4 +28,16 @@ def plain_text_for_discord(content: str) -> str:
     content = re.sub(r"(?m)^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$", "", content)
     content = content.replace("|", " - ")
     content = content.replace("```", "")
-    return content.strip()
+    counters: dict[int, int] = {}
+    normalized_lines: list[str] = []
+    for line in content.splitlines():
+        match = re.match(r"^(\s*)\d+[.)]\s+(.*)$", line)
+        if match:
+            indent = len(match.group(1))
+            counters[indent] = counters.get(indent, 0) + 1
+            counters = {level: count for level, count in counters.items() if level <= indent}
+            normalized_lines.append(f"{match.group(1)}{counters[indent]}. {match.group(2)}")
+        else:
+            counters.clear()
+            normalized_lines.append(line)
+    return "\n".join(normalized_lines).strip()

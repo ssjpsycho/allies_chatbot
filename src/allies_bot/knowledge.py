@@ -321,6 +321,12 @@ class KnowledgeBase:
         url = str(source.get("source_url") or "").lower()
         return label == "flame family" or url.endswith("/flame-family")
 
+    @staticmethod
+    def is_minstrel_source(source: dict[str, str | None]) -> bool:
+        label = str(source.get("source_label") or "").lower()
+        url = str(source.get("source_url") or "").lower()
+        return "minstrel" in label or "minstrel" in url
+
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None
     ) -> tuple[str, list[dict[str, str | None]]]:
@@ -340,7 +346,9 @@ class KnowledgeBase:
             sources = [
                 source
                 for source in sources
-                if not self.is_enemy_source(source) and not self.is_flame_song_source(source)
+                if not self.is_enemy_source(source)
+                and not self.is_flame_song_source(source)
+                and not self.is_minstrel_source(source)
             ]
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
@@ -382,7 +390,9 @@ class KnowledgeBase:
                         "Spirit; do not relabel them as Effects. "
                         "When the user asks what to pick, list only eligible picks and their "
                         "Families. Do not list what not to pick or explain excluded alternatives "
-                        "unless the user explicitly asks for restrictions or comparisons. "
+                        "unless the user explicitly asks for restrictions or comparisons. Do not "
+                        "mention Songs, Minstrels, or excluded options in the final answer unless "
+                        "the user explicitly asks about them. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

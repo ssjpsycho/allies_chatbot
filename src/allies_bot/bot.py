@@ -75,7 +75,7 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
         return
 
     source_lines = []
-    for source in sources[:8]:
+    for source in sources[:12]:
         label = str(source["source_label"])
         url = source["source_url"]
         source_lines.append(f"- {label}: <{url}>" if url else f"- {label}")

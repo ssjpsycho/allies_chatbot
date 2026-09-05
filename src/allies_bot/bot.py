@@ -43,7 +43,7 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
     for source in sources[:3]:
         label = str(source["source_label"])
         url = source["source_url"]
-        source_lines.append(f"- [{label}]({url})" if url else f"- {label}")
+        source_lines.append(f"- {label}: <{url}>" if url else f"- {label}")
     source_text = "\n".join(source_lines)
     content = f"{answer}\n\n**Sources**\n{source_text}"
     for message in split_for_discord(content):

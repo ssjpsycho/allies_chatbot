@@ -117,6 +117,16 @@ def test_character_build_filters_enemy_sources() -> None:
     assert not KnowledgeBase.is_enemy_source(judgment)
 
 
+def test_ziz_is_an_enemy_source() -> None:
+    ziz = {
+        "source_label": "Ziz",
+        "source_url": "https://wiki.test/books/catalogue-of-evil/page/ziz",
+        "text": "Bestial Disheartening Roar damages Resolve.",
+    }
+
+    assert KnowledgeBase.is_enemy_source(ziz)
+
+
 def test_character_build_filters_flame_song_source() -> None:
     flame = {
         "source_label": "Flame Family",

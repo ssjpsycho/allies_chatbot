@@ -360,7 +360,9 @@ class KnowledgeBase:
                 + " Progression 1 Order eligibility learn"
             )
         sources = self.search(retrieval_query)
-        if character_creation and not explicit_enemy_request:
+        if not explicit_enemy_request:
+            sources = [source for source in sources if not self.is_enemy_source(source)]
+        if character_creation:
             sources = [
                 source
                 for source in sources

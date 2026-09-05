@@ -298,17 +298,34 @@ class KnowledgeBase:
     def _source_key(source: dict[str, str | None]) -> str:
         return str(source.get("source_url") or source.get("source_label") or source.get("text"))
 
+    @staticmethod
+    def is_character_creation_question(question: str) -> bool:
+        question = question.lower()
+        return any(
+            phrase in question
+            for phrase in ("brand new", "character creation", "pick", "select", "choose", "learn")
+        )
+
+    @staticmethod
+    def is_enemy_source(source: dict[str, str | None]) -> bool:
+        url = str(source.get("source_url") or "").lower()
+        label = str(source.get("source_label") or "").lower()
+        return "catalogue-of-evil" in url or "corruption" in label
+
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None
     ) -> tuple[str, list[dict[str, str | None]]]:
         history = history or []
         retrieval_query = "\n".join([message.content for message in history[-4:]] + [question])
-        if any(
-            term in question.lower()
-            for term in ("brand new", "character creation", "pick", "select", "choose", "learn")
-        ):
+        character_creation = self.is_character_creation_question(question)
+        explicit_enemy_request = any(
+            term in question.lower() for term in ("unholy", "corrupt", "corruption", "enemy", "evil")
+        )
+        if character_creation:
             retrieval_query += "\ncharacter creation Order eligibility Spiritual Effect versus Song learn"
         sources = self.search(retrieval_query)
+        if character_creation and not explicit_enemy_request:
+            sources = [source for source in sources if not self.is_enemy_source(source)]
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
         context = "\n\n".join(

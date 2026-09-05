@@ -101,6 +101,22 @@ def test_direct_rule_phrases_include_judgment_wording() -> None:
     assert any(phrase in judgment_text.lower() for phrase in phrases)
 
 
+def test_character_build_filters_enemy_sources() -> None:
+    corruption = {
+        "source_label": "Fire Family (Corruption of the Flame Family)",
+        "source_url": "https://wiki.test/books/catalogue-of-evil/page/fire-family",
+        "text": "Burning Spite damages Resolve.",
+    }
+    judgment = {
+        "source_label": "Judgment Family",
+        "source_url": "https://wiki.test/books/character-creation-advancement/page/judgment-family",
+        "text": "Burning Coal damages Resolve.",
+    }
+
+    assert KnowledgeBase.is_enemy_source(corruption)
+    assert not KnowledgeBase.is_enemy_source(judgment)
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

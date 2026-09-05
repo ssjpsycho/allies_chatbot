@@ -22,7 +22,6 @@ from qdrant_client.models import (
 
 from allies_bot.config import Settings
 
-EMBEDDING_MODEL = "text-embedding-3-small"
 VECTOR_SIZE = 1536
 EMBEDDING_BATCH_SIZE = 128
 QDRANT_UPSERT_BATCH_SIZE = 64
@@ -174,7 +173,7 @@ class KnowledgeBase:
         for batch in batched(expanded, EMBEDDING_BATCH_SIZE):
             vectors.extend(
                 self.openai.embeddings.create(
-                    model=EMBEDDING_MODEL, input=[part for _, part in batch]
+                    model=self.settings.embedding_model, input=[part for _, part in batch]
                 ).data
             )
         points = []
@@ -221,7 +220,9 @@ class KnowledgeBase:
 
     def search(self, question: str, limit: int = SEARCH_RESULT_LIMIT) -> list[dict[str, str | None]]:
         self.ensure_collection()
-        vector = self.openai.embeddings.create(model=EMBEDDING_MODEL, input=question).data[0].embedding
+        vector = self.openai.embeddings.create(
+            model=self.settings.embedding_model, input=question
+        ).data[0].embedding
         result = self.qdrant.query_points(
             collection_name=self.settings.qdrant_collection,
             query=vector,
@@ -312,7 +313,7 @@ class KnowledgeBase:
             f"{message.role.title()}: {message.content}" for message in history
         )
         completion = self.openai.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=self.settings.chat_model,
             messages=[
                 {
                     "role": "system",

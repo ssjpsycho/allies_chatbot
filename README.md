@@ -64,6 +64,7 @@ Re-indexing updates the existing Qdrant collection using stable chunk IDs, so it
 1. Create a GitHub repository from this project and push it.
 2. At https://railway.app/, choose **New Project > Deploy from GitHub Repo** and select the repository.
 3. Add every value from `.env` under Railway **Variables**. Never commit `.env`.
+   Set `CHAT_MODEL` to the answer model you want, such as `gpt-4.1`, and set `EMBEDDING_MODEL` to `text-embedding-3-small`.
 4. Deploy. Railway reads `railway.json`, builds the Dockerfile, and keeps the bot process running.
 5. Railway runs the bot from the already indexed Qdrant collection. Re-index locally whenever the EPUB changes or wiki content needs a refresh, then verify the Railway bot is still running.
 

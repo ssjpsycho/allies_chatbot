@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     allowed_channel_ids: str
     openai_api_key: str
+    chat_model: str = "gpt-4.1"
+    embedding_model: str = "text-embedding-3-small"
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str = "allies_of_majesty"

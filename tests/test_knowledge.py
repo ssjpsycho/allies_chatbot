@@ -29,7 +29,7 @@ def test_qdrant_batch_size_is_smaller_than_embedding_batch_size() -> None:
 def test_search_terms_keeps_specific_game_terms() -> None:
     terms = KnowledgeBase.search_terms("What things lower Endurance through damage?")
 
-    assert terms == ["endurance", "through", "damage"]
+    assert terms == ["lower", "endurance", "through", "damage"]
 
 
 def test_exact_term_score_prefers_passage_matching_multiple_terms() -> None:
@@ -58,6 +58,19 @@ def test_striking_passage_matches_endurance_damage_question() -> None:
 
     assert all(term in passage.lower() for term in ("endurance", "damage"))
     assert "endurance" in terms
+
+
+def test_keyword_score_prefers_damage_to_endurance() -> None:
+    striking = {
+        "source_label": "Striking",
+        "text": "The Striker will deal damage to the Defender's Endurance.",
+    }
+    attributes = {"source_label": "War Attributes", "text": "Endurance affects Stamina."}
+
+    assert KnowledgeBase.keyword_score(striking, ["endurance", "damage"])[1] > 0
+    assert KnowledgeBase.keyword_score(striking, ["endurance", "damage"])[0] > (
+        KnowledgeBase.keyword_score(attributes, ["endurance", "damage"])[0]
+    )
 
 
 def test_split_for_discord_respects_message_limit() -> None:

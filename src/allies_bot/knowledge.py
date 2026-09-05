@@ -33,7 +33,7 @@ KEYWORD_RESULT_LIMIT = 8
 KEYWORD_SCROLL_LIMIT = 512
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
-    "have", "how", "into", "lower", "lowers", "made", "make", "more", "most", "that",
+    "have", "how", "into", "made", "make", "more", "most", "that",
     "than", "them", "there", "these", "they", "things", "what", "when", "which", "with",
     "would", "your",
 ])
@@ -197,6 +197,20 @@ class KnowledgeBase:
         terms = re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", question.lower())
         return [term for term in dict.fromkeys(terms) if term not in SEARCH_STOPWORDS]
 
+    @staticmethod
+    def keyword_score(source: dict[str, str | None], terms: list[str]) -> tuple[int, int, int]:
+        text = str(source.get("text") or "").lower()
+        distinct_terms = sum(term in text for term in terms)
+        occurrences = sum(text.count(term) for term in terms)
+        proximity = 0
+        for first_term in terms:
+            for second_term in terms:
+                if first_term == second_term:
+                    continue
+                if re.search(rf"{re.escape(first_term)}.{{0,100}}{re.escape(second_term)}", text):
+                    proximity += 1
+        return distinct_terms, proximity, occurrences
+
     def search(self, question: str, limit: int = SEARCH_RESULT_LIMIT) -> list[dict[str, str | None]]:
         self.ensure_collection()
         vector = self.openai.embeddings.create(model=EMBEDDING_MODEL, input=question).data[0].embedding
@@ -207,8 +221,9 @@ class KnowledgeBase:
         )
         semantic = [point.payload for point in result.points]
         seen = {self._source_key(source) for source in semantic}
-        keyword_scores: dict[str, tuple[int, dict[str, str | None]]] = {}
-        for term in self.search_terms(question):
+        terms = self.search_terms(question)
+        keyword_sources: dict[str, dict[str, str | None]] = {}
+        for term in terms:
             matches, _ = self.qdrant.scroll(
                 collection_name=self.settings.qdrant_collection,
                 scroll_filter=Filter(
@@ -221,15 +236,13 @@ class KnowledgeBase:
             for point in matches:
                 source = point.payload
                 key = self._source_key(source)
-                score = sum(
-                    str(source.get(field) or "").lower().count(term)
-                    for field in ("source_label", "text")
-                )
-                keyword_scores[key] = (keyword_scores.get(key, (0, source))[0] + score, source)
+                keyword_sources[key] = source
         keyword_matches = [
             source
             for _, source in sorted(
-                keyword_scores.values(), key=lambda item: item[0], reverse=True
+                keyword_sources.items(),
+                key=lambda item: self.keyword_score(item[1], terms),
+                reverse=True,
             )
             if self._source_key(source) not in seen
         ]

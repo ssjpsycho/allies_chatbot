@@ -49,3 +49,8 @@ This bot answers Discord slash-command questions using only the Allies of Majest
 - The bot accepts commands only in `ALLOWED_CHANNEL_IDS`; Discord permissions provide a second layer of control.
 - It retrieves source excerpts before answering and includes source links when the material came from the wiki.
 - Do not place bot, OpenAI, Qdrant, or BookStack tokens in source control or Discord messages.
+
+## Open in VS Code
+
+Open this folder directly in VS Code. The `code .` command works only after
+the VS Code shell command has been installed on your PATH.

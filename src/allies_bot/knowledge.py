@@ -30,7 +30,7 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 16
-KEYWORD_SCROLL_LIMIT = 512
+KEYWORD_SCROLL_LIMIT = 2048
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "made", "make", "more", "most", "that",
@@ -233,24 +233,23 @@ class KnowledgeBase:
                 seen.add(key)
         terms = self.search_terms(question)
         keyword_sources: dict[str, dict[str, str | None]] = {}
-        for term in terms:
-            matches, _ = self.qdrant.scroll(
-                collection_name=self.settings.qdrant_collection,
-                scroll_filter=Filter(
-                    must=[FieldCondition(key="text", match=MatchText(text=term))]
-                ),
-                limit=KEYWORD_SCROLL_LIMIT,
-                with_payload=True,
-                with_vectors=False,
-            )
-            for point in matches:
-                source = point.payload
-                key = self._source_key(source)
-                existing = keyword_sources.get(key)
-                if existing is None or self.keyword_score(source, terms) > self.keyword_score(
-                    existing, terms
-                ):
-                    keyword_sources[key] = source
+        matches, _ = self.qdrant.scroll(
+            collection_name=self.settings.qdrant_collection,
+            scroll_filter=Filter(
+                should=[FieldCondition(key="text", match=MatchText(text=term)) for term in terms]
+            ),
+            limit=KEYWORD_SCROLL_LIMIT,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in matches:
+            source = point.payload
+            key = self._source_key(source)
+            existing = keyword_sources.get(key)
+            if existing is None or self.keyword_score(source, terms) > self.keyword_score(
+                existing, terms
+            ):
+                keyword_sources[key] = source
         keyword_matches = [
             source
             for _, source in sorted(

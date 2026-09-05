@@ -32,6 +32,23 @@ def test_search_terms_keeps_specific_game_terms() -> None:
     assert terms == ["endurance", "through", "damage"]
 
 
+def test_exact_term_score_prefers_passage_matching_multiple_terms() -> None:
+    passages = [
+        {"source_label": "War Attributes", "text": "Endurance affects Stamina."},
+        {
+            "source_label": "Striking",
+            "text": "Hits deal damage to the Defender's Endurance.",
+        },
+    ]
+
+    scores = [
+        sum(source["text"].lower().count(term) for term in ("endurance", "damage"))
+        for source in passages
+    ]
+
+    assert scores[1] > scores[0]
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

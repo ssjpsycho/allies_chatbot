@@ -206,7 +206,7 @@ class KnowledgeBase:
         )
         semantic = [point.payload for point in result.points]
         seen = {self._source_key(source) for source in semantic}
-        keyword_matches: list[dict[str, str | None]] = []
+        keyword_scores: dict[str, tuple[int, dict[str, str | None]]] = {}
         for term in self.search_terms(question):
             matches, _ = self.qdrant.scroll(
                 collection_name=self.settings.qdrant_collection,
@@ -220,9 +220,20 @@ class KnowledgeBase:
             for point in matches:
                 source = point.payload
                 key = self._source_key(source)
-                if key not in seen:
-                    keyword_matches.append(source)
-                    seen.add(key)
+                score = sum(
+                    str(source.get(field) or "").lower().count(term)
+                    for field in ("source_label", "text")
+                )
+                keyword_scores[key] = (keyword_scores.get(key, (0, source))[0] + score, source)
+        keyword_matches = [
+            source
+            for _, source in sorted(
+                keyword_scores.values(), key=lambda item: item[0], reverse=True
+            )
+            if self._source_key(source) not in seen
+        ]
+        for source in keyword_matches:
+            seen.add(self._source_key(source))
         return (keyword_matches + semantic)[: limit + KEYWORD_RESULT_LIMIT]
 
     @staticmethod
@@ -250,8 +261,11 @@ class KnowledgeBase:
                     "role": "system",
                     "content": (
                         "Answer only from the supplied source excerpts and use conversation history "
-                        "to resolve references such as 'that' or 'it'. If the sources do not answer "
-                        "the question, say so plainly. Do not invent rules, lore, or citations."
+                        "to resolve references such as 'that' or 'it'. List direct rules separately "
+                        "from clearly labeled inferences. Do not turn implications into rules, and "
+                        "do not claim a complete list unless the excerpts establish completeness. "
+                        "If the sources do not answer the question, say so plainly. Do not invent "
+                        "rules, lore, or citations."
                     ),
                 },
                 {

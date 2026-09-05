@@ -49,6 +49,17 @@ def test_exact_term_score_prefers_passage_matching_multiple_terms() -> None:
     assert scores[1] > scores[0]
 
 
+def test_striking_passage_matches_endurance_damage_question() -> None:
+    passage = (
+        "If there are Hits remaining, the Striker will deal damage to the Defender's "
+        "Endurance."
+    )
+    terms = KnowledgeBase.search_terms("What things lower Endurance?")
+
+    assert all(term in passage.lower() for term in ("endurance", "damage"))
+    assert "endurance" in terms
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

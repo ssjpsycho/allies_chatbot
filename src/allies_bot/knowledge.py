@@ -30,6 +30,7 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 8
+KEYWORD_SCROLL_LIMIT = 512
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "lower", "lowers", "made", "make", "more", "most", "that",
@@ -213,7 +214,7 @@ class KnowledgeBase:
                 scroll_filter=Filter(
                     must=[FieldCondition(key="text", match=MatchText(text=term))]
                 ),
-                limit=KEYWORD_RESULT_LIMIT,
+                limit=KEYWORD_SCROLL_LIMIT,
                 with_payload=True,
                 with_vectors=False,
             )

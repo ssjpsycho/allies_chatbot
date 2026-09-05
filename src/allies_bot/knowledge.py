@@ -310,6 +310,10 @@ class KnowledgeBase:
         )
 
     @staticmethod
+    def is_minstrel_question(question: str) -> bool:
+        return "minstrel" in question.lower()
+
+    @staticmethod
     def is_enemy_source(source: dict[str, str | None]) -> bool:
         url = str(source.get("source_url") or "").lower()
         label = str(source.get("source_label") or "").lower()
@@ -333,13 +337,15 @@ class KnowledgeBase:
         history = history or []
         retrieval_query = "\n".join([message.content for message in history[-4:]] + [question])
         character_creation = self.is_character_creation_question(question)
+        minstrel_question = self.is_minstrel_question(question)
         explicit_enemy_request = any(
             term in question.lower() for term in ("unholy", "corrupt", "corruption", "enemy", "evil")
         )
         if character_creation:
             retrieval_query += (
-                "\ncharacter creation select 3 Spiritual Effects first effects different Families "
-                "Progression 1 Tier 1 Order eligibility Spiritual Effect versus Song learn"
+                "\ncharacter creation select 3 first Tier 1 "
+                + ("Songs Song Families" if minstrel_question else "Spiritual Effects different Families")
+                + " Progression 1 Order eligibility learn"
             )
         sources = self.search(retrieval_query)
         if character_creation and not explicit_enemy_request:
@@ -347,8 +353,8 @@ class KnowledgeBase:
                 source
                 for source in sources
                 if not self.is_enemy_source(source)
-                and not self.is_flame_song_source(source)
-                and not self.is_minstrel_source(source)
+                and (minstrel_question or not self.is_flame_song_source(source))
+                and (minstrel_question or not self.is_minstrel_source(source))
             ]
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
@@ -393,11 +399,12 @@ class KnowledgeBase:
                         "unless the user explicitly asks for restrictions or comparisons. Do not "
                         "mention Songs, Minstrels, or excluded options in the final answer unless "
                         "the user explicitly asks about them. "
-                        "For a brand-new character, use the Family progression table and recommend "
-                        "only the first Tier 1 Effect in each selected Family. Never substitute a "
-                        "later effect for the first one: in the Judgment Family, Gavel of Judgment "
-                        "is the first progression entry and Burning Coal is later, so Burning Coal "
-                        "is not a valid brand-new-character recommendation. If the first Effect's "
+                        "For a brand-new character, use the appropriate Family progression table "
+                        "and recommend only the first Tier 1 entry in each selected Family. For a "
+                        "standard Ministering Spirit this means Spiritual Effects; for a Minstrel "
+                        "this means Songs. Never substitute a later entry for the first one: in the "
+                        "Judgment Family, Gavel of Judgment is the first Spiritual Effect and "
+                        "Burning Coal is later. If the first entry's "
                         "name or eligibility is not present in the excerpts, say it is unverified "
                         "rather than recommending a later Effect. "
                         "If the sources do not answer the question, say so plainly. Do not invent "

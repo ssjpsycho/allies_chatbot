@@ -144,6 +144,10 @@ def test_character_build_retrieval_requests_first_tier_effects() -> None:
     assert "Tier 1" in retrieval_terms
 
 
+def test_minstrel_question_is_detected() -> None:
+    assert KnowledgeBase.is_minstrel_question("brand new minstrel character")
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

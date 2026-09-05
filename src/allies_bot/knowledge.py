@@ -195,7 +195,11 @@ class KnowledgeBase:
     @staticmethod
     def search_terms(question: str) -> list[str]:
         terms = re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", question.lower())
-        return [term for term in dict.fromkeys(terms) if term not in SEARCH_STOPWORDS]
+        terms = [term for term in dict.fromkeys(terms) if term not in SEARCH_STOPWORDS]
+        lowering_terms = {"lower", "lowers", "lowering", "reduce", "reduces", "reduced"}
+        if lowering_terms.intersection(terms):
+            terms.extend(term for term in ("damage", "reduce", "decrease") if term not in terms)
+        return terms
 
     @staticmethod
     def keyword_score(source: dict[str, str | None], terms: list[str]) -> tuple[int, int, int]:
@@ -275,9 +279,12 @@ class KnowledgeBase:
                     "role": "system",
                     "content": (
                         "Answer only from the supplied source excerpts and use conversation history "
-                        "to resolve references such as 'that' or 'it'. List direct rules separately "
-                        "from clearly labeled inferences. Do not turn implications into rules, and "
-                        "do not claim a complete list unless the excerpts establish completeness. "
+                        "to resolve references such as 'that' or 'it'. For questions asking what "
+                        "lowers or damages an attribute, list only explicit damage, reduction, or "
+                        "status rules for that attribute. Do not treat a resistance statistic, a "
+                        "stat used to resist an effect, or a related stat as something that lowers "
+                        "the attribute. Label any remaining inference separately, and do not claim "
+                        "a complete list unless the excerpts establish completeness. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

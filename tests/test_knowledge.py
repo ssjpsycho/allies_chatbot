@@ -29,7 +29,15 @@ def test_qdrant_batch_size_is_smaller_than_embedding_batch_size() -> None:
 def test_search_terms_keeps_specific_game_terms() -> None:
     terms = KnowledgeBase.search_terms("What things lower Endurance through damage?")
 
-    assert terms == ["lower", "endurance", "through", "damage"]
+    assert terms == ["lower", "endurance", "through", "damage", "reduce", "decrease"]
+
+
+def test_lowering_question_adds_damage_synonyms() -> None:
+    terms = KnowledgeBase.search_terms("What things lower Resolve?")
+
+    assert "resolve" in terms
+    assert "damage" in terms
+    assert "reduce" in terms
 
 
 def test_exact_term_score_prefers_passage_matching_multiple_terms() -> None:

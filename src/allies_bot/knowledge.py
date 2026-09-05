@@ -380,6 +380,9 @@ class KnowledgeBase:
                         "Song, do not recommend it as a Spiritual Effect. Flame Family entries are "
                         "Songs and are not valid Spiritual Effect picks for a standard Ministering "
                         "Spirit; do not relabel them as Effects. "
+                        "When the user asks what to pick, list only eligible picks and their "
+                        "Families. Do not list what not to pick or explain excluded alternatives "
+                        "unless the user explicitly asks for restrictions or comparisons. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

@@ -30,6 +30,13 @@ CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 32
 DIRECT_RULE_RESULT_LIMIT = 64
+SONG_FAMILY_LABELS = frozenset({
+    "cry family",
+    "fear family",
+    "flame family",
+    "flash family",
+    "zeal family",
+})
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "made", "make", "more", "most", "that",
@@ -326,6 +333,11 @@ class KnowledgeBase:
         return label == "flame family" or url.endswith("/flame-family")
 
     @staticmethod
+    def is_song_family_source(source: dict[str, str | None]) -> bool:
+        label = str(source.get("source_label") or "").lower()
+        return label in SONG_FAMILY_LABELS
+
+    @staticmethod
     def is_minstrel_source(source: dict[str, str | None]) -> bool:
         label = str(source.get("source_label") or "").lower()
         url = str(source.get("source_url") or "").lower()
@@ -353,7 +365,11 @@ class KnowledgeBase:
                 source
                 for source in sources
                 if not self.is_enemy_source(source)
-                and (minstrel_question or not self.is_flame_song_source(source))
+                and (
+                    self.is_song_family_source(source)
+                    if minstrel_question
+                    else not self.is_flame_song_source(source)
+                )
                 and (minstrel_question or not self.is_minstrel_source(source))
             ]
         if not sources:
@@ -394,6 +410,9 @@ class KnowledgeBase:
                         "Song, do not recommend it as a Spiritual Effect. Flame Family entries are "
                         "Songs and are not valid Spiritual Effect picks for a standard Ministering "
                         "Spirit; do not relabel them as Effects. "
+                        "For a Minstrel, only sources identified as Song Families are eligible; "
+                        "Judgment, Passion, Presence, and other Spiritual Effect Families are not "
+                        "Song Families and must not be recommended as Songs. "
                         "When the user asks what to pick, list only eligible picks and their "
                         "Families. Do not list what not to pick or explain excluded alternatives "
                         "unless the user explicitly asks for restrictions or comparisons. Do not "

@@ -137,6 +137,16 @@ def test_character_build_filters_minstrel_source() -> None:
     assert KnowledgeBase.is_minstrel_source(minstrel)
 
 
+def test_minstrel_build_accepts_only_song_families() -> None:
+    flame = {"source_label": "Flame Family", "source_url": "", "text": "Song"}
+    judgment = {"source_label": "Judgment Family", "source_url": "", "text": "Spiritual Effect"}
+    passion = {"source_label": "Passion Family", "source_url": "", "text": "Spiritual Effect"}
+
+    assert KnowledgeBase.is_song_family_source(flame)
+    assert not KnowledgeBase.is_song_family_source(judgment)
+    assert not KnowledgeBase.is_song_family_source(passion)
+
+
 def test_character_build_retrieval_requests_first_tier_effects() -> None:
     retrieval_terms = "Progression 1 Tier 1 first Spiritual Effect"
 

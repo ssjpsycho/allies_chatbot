@@ -81,6 +81,13 @@ def test_keyword_score_prefers_damage_to_endurance() -> None:
     )
 
 
+def test_source_key_deduplicates_chunks_from_one_page() -> None:
+    first_chunk = {"source_label": "Judgment Family", "source_url": "https://wiki.test/judgment", "text": "Gavel"}
+    second_chunk = {"source_label": "Judgment Family", "source_url": "https://wiki.test/judgment", "text": "Coal"}
+
+    assert KnowledgeBase._source_key(first_chunk) == KnowledgeBase._source_key(second_chunk)
+
+
 def test_split_for_discord_respects_message_limit() -> None:
     content = ("word " * 600).strip()
     messages = split_for_discord(content)

@@ -223,8 +223,14 @@ class KnowledgeBase:
             query=vector,
             limit=limit,
         )
-        semantic = [point.payload for point in result.points]
-        seen = {self._source_key(source) for source in semantic}
+        semantic: list[dict[str, str | None]] = []
+        seen: set[str] = set()
+        for point in result.points:
+            source = point.payload
+            key = self._source_key(source)
+            if key not in seen:
+                semantic.append(source)
+                seen.add(key)
         terms = self.search_terms(question)
         keyword_sources: dict[str, dict[str, str | None]] = {}
         for term in terms:
@@ -240,7 +246,11 @@ class KnowledgeBase:
             for point in matches:
                 source = point.payload
                 key = self._source_key(source)
-                keyword_sources[key] = source
+                existing = keyword_sources.get(key)
+                if existing is None or self.keyword_score(source, terms) > self.keyword_score(
+                    existing, terms
+                ):
+                    keyword_sources[key] = source
         keyword_matches = [
             source
             for _, source in sorted(
@@ -256,7 +266,7 @@ class KnowledgeBase:
 
     @staticmethod
     def _source_key(source: dict[str, str | None]) -> str:
-        return f"{source.get('source_label')}:{source.get('text')}"
+        return str(source.get("source_url") or source.get("source_label") or source.get("text"))
 
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None

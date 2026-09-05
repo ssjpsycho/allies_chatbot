@@ -362,7 +362,11 @@ class KnowledgeBase:
                         "first Spiritual Effect in 3 different Families; do not say they select only "
                         "one. Recommend three eligible Effects when the supplied rules support them, "
                         "and identify their Families. Do not use Markdown tables because Discord does "
-                        "not render them reliably; use headings and bullet lists instead. "
+                        "not render them reliably; use plain headings and bullet lists instead. "
+                        "Treat the source's classification as authoritative: if a Family entry is a "
+                        "Song, do not recommend it as a Spiritual Effect. Flame Family entries are "
+                        "Songs and are not valid Spiritual Effect picks for a standard Ministering "
+                        "Spirit; do not relabel them as Effects. "
                         "If the sources do not answer the question, say so plainly. Do not invent "
                         "rules, lore, or citations."
                     ),

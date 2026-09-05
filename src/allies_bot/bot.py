@@ -7,7 +7,7 @@ from discord import app_commands
 
 from allies_bot.config import Settings
 from allies_bot.knowledge import ConversationMessage, KnowledgeBase
-from allies_bot.messages import split_for_discord
+from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 logger = logging.getLogger(__name__)
 BACKEND_TIMEOUT_SECONDS = 90
@@ -80,7 +80,9 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
         url = source["source_url"]
         source_lines.append(f"- {label}: <{url}>" if url else f"- {label}")
     source_text = "\n".join(source_lines)
-    content = f"**Question:** {question}\n\n{answer}\n\n**Sources**\n{source_text}"
+    content = plain_text_for_discord(
+        f"Question: {question}\n\n{answer}\n\nSources\n{source_text}"
+    )
     for message in split_for_discord(content):
         await interaction.followup.send(message)
 

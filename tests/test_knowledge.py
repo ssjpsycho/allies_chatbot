@@ -4,7 +4,7 @@ import httpx
 
 from allies_bot.ingest import get_bookstack
 from allies_bot.knowledge import QDRANT_UPSERT_BATCH_SIZE, KnowledgeBase, batched, chunk_text
-from allies_bot.messages import split_for_discord
+from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 
 def test_chunk_text_preserves_content_and_overlap() -> None:
@@ -124,6 +124,17 @@ def test_split_for_discord_respects_message_limit() -> None:
     assert len(messages) == 2
     assert all(len(message) <= 2000 for message in messages)
     assert " ".join(messages) == content
+
+
+def test_plain_text_for_discord_removes_markdown() -> None:
+    content = "## Pick **Gavel**\n| Effect | Family |\n| --- | --- |\n| Gavel | Judgment |\n[Rules](https://wiki.test/rules)"
+
+    result = plain_text_for_discord(content)
+
+    assert "##" not in result
+    assert "**" not in result
+    assert "|" not in result
+    assert "Rules: <https://wiki.test/rules>" in result
 
 
 def test_get_bookstack_retries_rate_limit(monkeypatch) -> None:

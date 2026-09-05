@@ -28,8 +28,6 @@ This bot answers Discord slash-command questions using only the Allies of Majest
    python3 -m allies_bot.ingest --wiki --epub
    ```
 
-   Re-run this command after adding or changing wiki pages so the Qdrant collection contains the current source text.
-
 6. Start the bot:
 
    ```sh
@@ -38,13 +36,36 @@ This bot answers Discord slash-command questions using only the Allies of Majest
 
 7. In an allowed channel, run `/ask` and ask a question. The bot remembers the latest eight turns per server/channel/user in Qdrant, so follow-up questions can refer to earlier messages. Backend calls have timeouts and return a retry message if a service is unavailable. Long answers are split across Discord messages; `/sources` shows the configured sources.
 
-## 3. Deploy to Railway
+## 3. Re-index sources
+
+Run these commands from the project directory with the project environment active:
+
+```sh
+cd "/Users/benjaminh/Documents/Allies/AI Tools/allies-discord-bot"
+source .venv/bin/activate
+```
+
+After adding or changing wiki pages, refresh the wiki only:
+
+```sh
+python3 -m allies_bot.ingest --wiki
+```
+
+After replacing or changing the EPUB, refresh both sources:
+
+```sh
+python3 -m allies_bot.ingest --wiki --epub
+```
+
+Re-indexing updates the existing Qdrant collection using stable chunk IDs, so it is safe to run again. It uses embedding API credits and may take several minutes. Use the current Qdrant, OpenAI, and BookStack credentials in `.env`. Do not run this from Railway unless the EPUB is available there; run it locally, then leave the bot deployed on Railway.
+
+## 4. Deploy to Railway
 
 1. Create a GitHub repository from this project and push it.
 2. At https://railway.app/, choose **New Project > Deploy from GitHub Repo** and select the repository.
 3. Add every value from `.env` under Railway **Variables**. Never commit `.env`.
 4. Deploy. Railway reads `railway.json`, builds the Dockerfile, and keeps the bot process running.
-5. Run source indexing from your computer whenever the EPUB changes or wiki content needs a refresh. Automated scheduled sync can be added after the first successful deployment.
+5. Railway runs the bot from the already indexed Qdrant collection. Re-index locally whenever the EPUB changes or wiki content needs a refresh, then verify the Railway bot is still running.
 
 ## Security and behavior
 

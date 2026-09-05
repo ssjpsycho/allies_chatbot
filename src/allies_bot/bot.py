@@ -45,11 +45,18 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
         return
     await interaction.response.defer(thinking=True)
     conversation_key = f"{interaction.guild_id or 0}:{interaction.channel_id}:{interaction.user.id}"
+    history = []
     try:
         history = await asyncio.wait_for(
             asyncio.to_thread(bot.knowledge.load_conversation, conversation_key),
             timeout=BACKEND_TIMEOUT_SECONDS,
         )
+    except TimeoutError:
+        logger.exception("Timed out while loading conversation memory; continuing without history")
+    except Exception:
+        logger.exception("Failed to load conversation memory; continuing without history")
+
+    try:
         answer, sources = await asyncio.wait_for(
             asyncio.to_thread(bot.knowledge.answer, question, history),
             timeout=BACKEND_TIMEOUT_SECONDS,

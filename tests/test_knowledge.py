@@ -3,7 +3,7 @@ import asyncio
 import httpx
 
 from allies_bot.ingest import get_bookstack
-from allies_bot.knowledge import QDRANT_UPSERT_BATCH_SIZE, batched, chunk_text
+from allies_bot.knowledge import QDRANT_UPSERT_BATCH_SIZE, KnowledgeBase, batched, chunk_text
 from allies_bot.messages import split_for_discord
 
 
@@ -24,6 +24,12 @@ def test_batched_preserves_order_and_limit() -> None:
 
 def test_qdrant_batch_size_is_smaller_than_embedding_batch_size() -> None:
     assert QDRANT_UPSERT_BATCH_SIZE < 128
+
+
+def test_search_terms_keeps_specific_game_terms() -> None:
+    terms = KnowledgeBase.search_terms("What things lower Endurance through damage?")
+
+    assert terms == ["endurance", "through", "damage"]
 
 
 def test_split_for_discord_respects_message_limit() -> None:

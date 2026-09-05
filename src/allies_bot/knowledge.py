@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -10,8 +11,12 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchText,
     MatchValue,
     PointStruct,
+    TextIndexParams,
+    TextIndexType,
+    TokenizerType,
     VectorParams,
 )
 
@@ -23,6 +28,14 @@ EMBEDDING_BATCH_SIZE = 128
 QDRANT_UPSERT_BATCH_SIZE = 64
 CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
+SEARCH_RESULT_LIMIT = 5
+KEYWORD_RESULT_LIMIT = 8
+SEARCH_STOPWORDS = frozenset([
+    "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
+    "have", "how", "into", "lower", "lowers", "made", "make", "more", "most", "that",
+    "than", "them", "there", "these", "they", "things", "what", "when", "which", "with",
+    "would", "your",
+])
 
 Item = TypeVar("Item")
 
@@ -79,6 +92,16 @@ class KnowledgeBase:
                 collection_name=self.settings.qdrant_collection,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
+        self.qdrant.create_payload_index(
+            collection_name=self.settings.qdrant_collection,
+            field_name="text",
+            field_schema=TextIndexParams(
+                type=TextIndexType.TEXT,
+                tokenizer=TokenizerType.WORD,
+                lowercase=True,
+                phrase_matching=True,
+            ),
+        )
 
     @property
     def memory_collection(self) -> str:
@@ -168,7 +191,12 @@ class KnowledgeBase:
             self.qdrant.upsert(collection_name=self.settings.qdrant_collection, points=batch)
         return len(points)
 
-    def search(self, question: str, limit: int = 5) -> list[dict[str, str | None]]:
+    @staticmethod
+    def search_terms(question: str) -> list[str]:
+        terms = re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", question.lower())
+        return [term for term in dict.fromkeys(terms) if term not in SEARCH_STOPWORDS]
+
+    def search(self, question: str, limit: int = SEARCH_RESULT_LIMIT) -> list[dict[str, str | None]]:
         self.ensure_collection()
         vector = self.openai.embeddings.create(model=EMBEDDING_MODEL, input=question).data[0].embedding
         result = self.qdrant.query_points(
@@ -176,7 +204,30 @@ class KnowledgeBase:
             query=vector,
             limit=limit,
         )
-        return [point.payload for point in result.points]
+        semantic = [point.payload for point in result.points]
+        seen = {self._source_key(source) for source in semantic}
+        keyword_matches: list[dict[str, str | None]] = []
+        for term in self.search_terms(question):
+            matches, _ = self.qdrant.scroll(
+                collection_name=self.settings.qdrant_collection,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="text", match=MatchText(text=term))]
+                ),
+                limit=KEYWORD_RESULT_LIMIT,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in matches:
+                source = point.payload
+                key = self._source_key(source)
+                if key not in seen:
+                    keyword_matches.append(source)
+                    seen.add(key)
+        return (keyword_matches + semantic)[: limit + KEYWORD_RESULT_LIMIT]
+
+    @staticmethod
+    def _source_key(source: dict[str, str | None]) -> str:
+        return f"{source.get('source_label')}:{source.get('text')}"
 
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None

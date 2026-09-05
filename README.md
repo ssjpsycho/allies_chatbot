@@ -47,6 +47,7 @@ This bot answers Discord slash-command questions using only the Allies of Majest
 ## Security and behavior
 
 - The bot accepts commands only in `ALLOWED_CHANNEL_IDS`; Discord permissions provide a second layer of control.
+- It combines semantic retrieval with exact-term retrieval, which helps named mechanics such as `Endurance`, `damage`, and `Stops` appear even when a question is phrased broadly.
 - It retrieves source excerpts before answering and includes source links when the material came from the wiki.
 - Do not place bot, OpenAI, Qdrant, or BookStack tokens in source control or Discord messages.
 

@@ -1,0 +1,1 @@
+"""Allies of Majesty Discord knowledge bot."""

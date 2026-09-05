@@ -30,7 +30,6 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 5
 KEYWORD_RESULT_LIMIT = 32
-KEYWORD_SCROLL_LIMIT = 2048
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
     "have", "how", "into", "made", "make", "more", "most", "that",
@@ -86,8 +85,11 @@ class KnowledgeBase:
         self.settings = settings
         self.openai = OpenAI(api_key=settings.openai_api_key)
         self.qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        self.collection_ready = False
 
     def ensure_collection(self) -> None:
+        if self.collection_ready:
+            return
         if not self.qdrant.collection_exists(self.settings.qdrant_collection):
             self.qdrant.create_collection(
                 collection_name=self.settings.qdrant_collection,
@@ -103,6 +105,7 @@ class KnowledgeBase:
                 phrase_matching=True,
             ),
         )
+        self.collection_ready = True
 
     @property
     def memory_collection(self) -> str:
@@ -232,17 +235,16 @@ class KnowledgeBase:
                 semantic.append(source)
                 seen.add(key)
         terms = self.search_terms(question)
-        keyword_sources: dict[str, dict[str, str | None]] = {}
-        matches, _ = self.qdrant.scroll(
+        keyword_result = self.qdrant.query_points(
             collection_name=self.settings.qdrant_collection,
-            scroll_filter=Filter(
+            query=vector,
+            query_filter=Filter(
                 should=[FieldCondition(key="text", match=MatchText(text=term)) for term in terms]
             ),
-            limit=KEYWORD_SCROLL_LIMIT,
-            with_payload=True,
-            with_vectors=False,
+            limit=KEYWORD_RESULT_LIMIT,
         )
-        for point in matches:
+        keyword_sources: dict[str, dict[str, str | None]] = {}
+        for point in keyword_result.points:
             source = point.payload
             key = self._source_key(source)
             existing = keyword_sources.get(key)

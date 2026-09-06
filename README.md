@@ -2,6 +2,53 @@
 
 This bot answers Discord slash-command questions using only the Allies of Majesty BookStack wiki and the local EPUB. It is restricted to the Discord channel IDs you explicitly configure.
 
+## How the project works
+
+The project has two related workflows: a code workflow and a knowledge workflow.
+
+### Code workflow
+
+1. You edit the project locally in VS Code.
+2. You run tests and lint checks locally.
+3. Git commits the code changes and pushes them to the `main` branch of GitHub.
+4. Railway watches the GitHub repository. A push to `main` starts a new deployment.
+5. Railway builds the Docker image, installs the Python package, and starts the Discord bot.
+
+Railway deploys the application code. It does not automatically copy your local `.env`, EPUB, or Python virtual environment. Railway secrets and variables must be configured separately in the Railway service.
+
+### Knowledge workflow
+
+The wiki and EPUB are not sent to Discord and are not committed to Git. They are converted into searchable knowledge in Qdrant:
+
+1. The importer reads public BookStack pages through the BookStack API and extracts text from the EPUB.
+2. Each source document is split into smaller overlapping chunks so relevant passages can be retrieved later.
+3. OpenAI's embedding model converts each chunk into a numerical vector.
+4. Qdrant stores the vectors together with the original text, source title, and wiki URL.
+5. When a user asks `/ask`, the bot embeds the question, searches Qdrant, and retrieves relevant source passages.
+6. The configured chat model receives the question, recent conversation context, and retrieved source passages.
+7. The bot returns a source-grounded answer in Discord with citations.
+
+The chat model generates the wording of an answer; it does not replace the source data. The embedding model is used for search, while Qdrant is the searchable store. Changing the chat model does not require re-indexing. Changing the embedding model requires rebuilding or migrating the Qdrant collection and re-indexing the sources.
+
+### End-to-end workflow
+
+```text
+VS Code edit
+   |
+   v
+Git commit and push to GitHub -----> Railway builds and runs the Discord bot
+
+BookStack wiki + local EPUB
+   |
+   v
+Importer -> chunks -> OpenAI embeddings -> Qdrant
+                                    ^
+                                    |
+Discord question -> question embedding -> retrieval -> chat model -> cited answer
+```
+
+The daily GitHub Actions workflow checks whether BookStack page metadata changed. If it did, the workflow re-indexes the wiki in Qdrant and commits a small sync-state file to GitHub. That commit triggers Railway to redeploy the code. The workflow does not re-index the local EPUB because the EPUB is not available in GitHub Actions; run the EPUB command locally when the book changes.
+
 ## 1. Create accounts and credentials
 
 1. Create a Discord application at https://discord.com/developers/applications, add a Bot, and copy its token.

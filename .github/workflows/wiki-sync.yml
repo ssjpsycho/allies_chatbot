@@ -1,0 +1,49 @@
+name: Sync wiki knowledge
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install project
+        run: python -m pip install .
+
+      - name: Re-index wiki when changed
+        env:
+          DISCORD_TOKEN: unused
+          ALLOWED_CHANNEL_IDS: "0"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          BOOKSTACK_BASE_URL: ${{ secrets.BOOKSTACK_BASE_URL }}
+          BOOKSTACK_TOKEN: ${{ secrets.BOOKSTACK_TOKEN }}
+        run: python -m allies_bot.ingest --wiki-if-changed
+
+      - name: Commit sync state when changed
+        run: |
+          if [ -z "$(git status --porcelain -- .wiki-sync-state.json)" ]; then
+            echo "Wiki unchanged; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .wiki-sync-state.json
+          git commit -m "Sync wiki knowledge index"
+          git push origin HEAD:main

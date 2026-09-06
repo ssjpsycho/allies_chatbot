@@ -1,6 +1,9 @@
 import argparse
 import asyncio
+import hashlib
+import json
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -81,6 +84,48 @@ async def fetch_wiki(settings: Settings) -> list[DocumentChunk]:
     return documents
 
 
+async def wiki_fingerprint(settings: Settings) -> str:
+    if not settings.bookstack_token:
+        raise ValueError("BOOKSTACK_TOKEN is required for wiki synchronization.")
+    headers = {"Authorization": f"Token {settings.bookstack_token}"}
+    summaries: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(base_url=settings.bookstack_base_url, headers=headers, timeout=30) as client:
+        offset = 0
+        while True:
+            response = await get_bookstack(client, "/api/pages", params={"count": 100, "offset": offset})
+            data = response.json()
+            summaries.extend(
+                {
+                    key: page.get(key)
+                    for key in ("id", "name", "slug", "updated_at")
+                    if key in page
+                }
+                for page in data["data"]
+            )
+            offset += len(data["data"])
+            if offset >= data["total"] or not data["data"]:
+                break
+    canonical = json.dumps(sorted(summaries, key=lambda page: page.get("id", 0)), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sync_state_changed(state_path: Path, fingerprint: str) -> bool:
+    if not state_path.exists():
+        return True
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    return state.get("wiki_fingerprint") != fingerprint
+
+
+def write_sync_state(state_path: Path, fingerprint: str) -> None:
+    state_path.write_text(
+        json.dumps({"wiki_fingerprint": fingerprint}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def fetch_epub(settings: Settings) -> list[DocumentChunk]:
     if not settings.epub_path.exists():
         raise FileNotFoundError(f"EPUB not found: {settings.epub_path}")
@@ -104,11 +149,33 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Index Allies of Majesty sources.")
     parser.add_argument("--wiki", action="store_true", help="Index BookStack pages through its API.")
     parser.add_argument("--epub", action="store_true", help="Index the configured EPUB file.")
+    parser.add_argument(
+        "--wiki-if-changed",
+        action="store_true",
+        help="Index the wiki only when its page metadata fingerprint changed.",
+    )
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        default=Path(".wiki-sync-state.json"),
+        help="File used to store the last wiki fingerprint.",
+    )
     args = parser.parse_args()
-    if not args.wiki and not args.epub:
-        parser.error("Choose --wiki, --epub, or both.")
+    if not args.wiki and not args.epub and not args.wiki_if_changed:
+        parser.error("Choose --wiki, --wiki-if-changed, --epub, or both.")
 
     settings = Settings()
+    if args.wiki_if_changed:
+        fingerprint = await wiki_fingerprint(settings)
+        if not sync_state_changed(args.state_file, fingerprint):
+            print("Wiki unchanged; no indexing required.")
+            return
+        documents = await fetch_wiki(settings)
+        indexed = KnowledgeBase(settings).index(documents)
+        write_sync_state(args.state_file, fingerprint)
+        print(f"Wiki changed; indexed {indexed} chunks from {len(documents)} source documents.")
+        return
+
     documents: list[DocumentChunk] = []
     if args.wiki:
         documents.extend(await fetch_wiki(settings))

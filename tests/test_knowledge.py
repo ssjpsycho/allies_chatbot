@@ -1,8 +1,9 @@
 import asyncio
+import json
 
 import httpx
 
-from allies_bot.ingest import get_bookstack
+from allies_bot.ingest import get_bookstack, sync_state_changed, write_sync_state
 from allies_bot.knowledge import QDRANT_UPSERT_BATCH_SIZE, KnowledgeBase, batched, chunk_text
 from allies_bot.messages import plain_text_for_discord, split_for_discord
 
@@ -155,6 +156,16 @@ def test_minstrel_build_accepts_only_song_families() -> None:
     assert KnowledgeBase.is_song_family_source(flame)
     assert not KnowledgeBase.is_song_family_source(judgment)
     assert not KnowledgeBase.is_song_family_source(passion)
+
+
+def test_sync_state_detects_changes(tmp_path) -> None:
+    state_path = tmp_path / "wiki-state.json"
+
+    assert sync_state_changed(state_path, "first")
+    write_sync_state(state_path, "first")
+    assert not sync_state_changed(state_path, "first")
+    assert sync_state_changed(state_path, "second")
+    assert json.loads(state_path.read_text()) == {"wiki_fingerprint": "first"}
 
 
 def test_character_build_retrieval_requests_first_tier_effects() -> None:

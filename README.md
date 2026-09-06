@@ -68,6 +68,24 @@ Re-indexing updates the existing Qdrant collection using stable chunk IDs, so it
 4. Deploy. Railway reads `railway.json`, builds the Dockerfile, and keeps the bot process running.
 5. Railway runs the bot from the already indexed Qdrant collection. Re-index locally whenever the EPUB changes or wiki content needs a refresh, then verify the Railway bot is still running.
 
+## 5. Automatic daily wiki sync
+
+The repository includes a GitHub Actions workflow at `.github/workflows/wiki-sync.yml`. It runs daily at 03:17 UTC and can also be started manually from the GitHub **Actions** tab. It checks BookStack page metadata first; if nothing changed, it exits without embedding or committing anything. If the wiki changed, it updates Qdrant, commits `.wiki-sync-state.json`, and pushes to `main`, which triggers Railway's GitHub deployment.
+
+Add these GitHub repository secrets under **Settings > Secrets and variables > Actions**:
+
+- `OPENAI_API_KEY`
+- `QDRANT_URL`
+- `QDRANT_API_KEY`
+- `BOOKSTACK_BASE_URL`
+- `BOOKSTACK_TOKEN`
+
+The workflow does not need `DISCORD_TOKEN` because it never starts the bot. It does not re-index the local EPUB; run the full local command manually after changing that file:
+
+```sh
+python3 -m allies_bot.ingest --wiki --epub
+```
+
 ## Security and behavior
 
 - The bot accepts commands only in `ALLOWED_CHANNEL_IDS`; Discord permissions provide a second layer of control.

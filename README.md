@@ -106,6 +106,24 @@ python3 -m allies_bot.ingest --wiki --epub
 
 Re-indexing updates the existing Qdrant collection using stable chunk IDs, so it is safe to run again. It uses embedding API credits and may take several minutes. Use the current Qdrant, OpenAI, and BookStack credentials in `.env`. Do not run this from Railway unless the EPUB is available there; run it locally, then leave the bot deployed on Railway.
 
+### How content is prepared for retrieval
+
+- HTML is converted to Markdown-like text (headings, lists and tables are kept; scripts and styles are dropped).
+- Pages are chunked by heading section. Every chunk begins with a `Page > Heading > Subheading` line, so it makes sense on its own when embedded. Tiny sections are merged with the next one.
+- Each chunk stores `source_id` and `heading` in Qdrant. After a re-index, chunks that no longer exist (edited or deleted pages, and chunks from the old chunking scheme) are deleted for the source kind being indexed, so `--wiki` prunes wiki chunks and `--epub` prunes EPUB chunks.
+
+Because chunk text changed, run `python3 -m allies_bot.ingest --wiki --epub` once to apply this to existing data.
+
+### Data quality report
+
+```sh
+python3 -m allies_bot.quality --wiki                      # chunk stats and flagged pages (no OpenAI/Qdrant calls)
+python3 -m allies_bot.quality --wiki --show-page "Page"   # print the chunks of one page
+python3 -m allies_bot.quality --queries questions.json    # retrieval hit rate against the live index
+```
+
+`questions.json` is a list such as `[{"question": "How does Flame Song work?", "expected": "Flame Family"}]`; `expected` is matched against the retrieved page titles. Run it before and after re-indexing to measure the change.
+
 ## 4. Deploy to Railway
 
 1. Create a GitHub repository from this project and push it.

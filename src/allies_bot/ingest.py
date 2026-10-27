@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -16,21 +17,62 @@ REQUEST_DELAY_SECONDS = 0.5
 MAX_RETRIES = 6
 
 
+SKIPPED_TAGS = frozenset({"script", "style", "head", "noscript"})
+BLOCK_TAGS = frozenset({
+    "p", "div", "section", "article", "blockquote", "ul", "ol", "table", "tr",
+    "br", "pre", "hr", "dl", "dt", "dd", "figure", "figcaption", "body",
+})
+HEADING_TAGS = {f"h{level}": level for level in range(1, 7)}
+
+
 class TextExtractor(HTMLParser):
+    """Converts HTML to Markdown-like text that keeps headings, lists and tables."""
+
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in SKIPPED_TAGS:
+            self.skip_depth += 1
+        elif tag in HEADING_TAGS:
+            self.parts.append("\n\n" + "#" * HEADING_TAGS[tag] + " ")
+        elif tag == "li":
+            self.parts.append("\n- ")
+        elif tag in BLOCK_TAGS and tag != "tr":
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in SKIPPED_TAGS:
+            self.skip_depth = max(0, self.skip_depth - 1)
+        elif tag in HEADING_TAGS:
+            self.parts.append("\n\n")
+        elif tag in {"td", "th"}:
+            self.parts.append(" | ")
+        elif tag in BLOCK_TAGS:
+            self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
-        self.parts.append(data)
+        if not self.skip_depth:
+            self.parts.append(re.sub(r"\s+", " ", data))
 
     def text(self) -> str:
-        return " ".join(self.parts)
+        lines = []
+        for line in "".join(self.parts).split("\n"):
+            line = line.strip()
+            if line.endswith(" |"):
+                line = line[:-2].rstrip()
+            elif line == "|":
+                line = ""
+            lines.append(line)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def html_to_text(html: str) -> str:
     parser = TextExtractor()
     parser.feed(html)
+    parser.close()
     return parser.text()
 
 
@@ -171,17 +213,20 @@ async def main() -> None:
             print("Wiki unchanged; no indexing required.")
             return
         documents = await fetch_wiki(settings)
-        indexed = KnowledgeBase(settings).index(documents)
+        indexed = KnowledgeBase(settings).index(documents, prune_prefixes=("bookstack:",))
         write_sync_state(args.state_file, fingerprint)
         print(f"Wiki changed; indexed {indexed} chunks from {len(documents)} source documents.")
         return
 
     documents: list[DocumentChunk] = []
+    prune_prefixes: list[str] = []
     if args.wiki:
         documents.extend(await fetch_wiki(settings))
+        prune_prefixes.append("bookstack:")
     if args.epub:
         documents.extend(fetch_epub(settings))
-    indexed = KnowledgeBase(settings).index(documents)
+        prune_prefixes.append("epub:")
+    indexed = KnowledgeBase(settings).index(documents, prune_prefixes=tuple(prune_prefixes))
     print(f"Indexed {indexed} chunks from {len(documents)} source documents.")
 
 

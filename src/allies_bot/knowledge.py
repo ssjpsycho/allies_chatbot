@@ -13,6 +13,8 @@ from qdrant_client.models import (
     Filter,
     MatchText,
     MatchValue,
+    PayloadSchemaType,
+    PointIdsList,
     PointStruct,
     TextIndexParams,
     TextIndexType,
@@ -43,6 +45,11 @@ SEARCH_STOPWORDS = frozenset([
     "than", "them", "there", "these", "they", "things", "what", "when", "which", "with",
     "would", "your",
 ])
+
+CHUNK_SIZE = 1200
+MIN_SECTION_CHARS = 300
+HEADING_PATTERN = re.compile(r"^(#{1,6}) +(.*\S)\s*$")
+STALE_DELETE_BATCH_SIZE = 256
 
 Item = TypeVar("Item")
 
@@ -82,6 +89,75 @@ def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> list[st
     return chunks
 
 
+def _split_sections(text: str) -> list[tuple[list[str], str]]:
+    """Split Markdown-like text into (heading path, body) sections."""
+    sections: list[tuple[list[str], str]] = []
+    stack: list[tuple[int, str]] = []
+    body: list[str] = []
+
+    def flush() -> None:
+        content = "\n".join(body).strip()
+        if content:
+            sections.append(([heading for _, heading in stack], content))
+        body.clear()
+
+    for line in text.splitlines():
+        match = HEADING_PATTERN.match(line)
+        if match:
+            flush()
+            level = len(match.group(1))
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, match.group(2)))
+        else:
+            body.append(line)
+    flush()
+    return sections
+
+
+def _pack_lines(body: str, budget: int) -> list[str]:
+    pieces: list[str] = []
+    current = ""
+    for line in body.split("\n"):
+        for part in chunk_text(line, budget, overlap=100) if len(line) > budget else [line]:
+            if current and len(current) + len(part) + 1 > budget:
+                pieces.append(current.strip())
+                current = ""
+            current = f"{current}\n{part}" if current else part
+    if current.strip():
+        pieces.append(current.strip())
+    return pieces
+
+
+def chunk_document(
+    title: str, text: str, chunk_size: int = CHUNK_SIZE
+) -> list[tuple[str, str]]:
+    """Return (chunk text, heading path) pairs.
+
+    Chunks follow heading sections and every chunk starts with a
+    "Title > Heading" context line so it is meaningful on its own.
+    """
+    sections = _split_sections(text)
+    if not sections:
+        return []
+    chunks: list[tuple[str, str]] = []
+    carried = ""
+    for index, (headings, body) in enumerate(sections):
+        path = [title] + [h for h in headings if h != title]
+        context = " > ".join(path)
+        label = headings[-1] if headings else ""
+        content = f"{carried}\n{body}".strip() if carried else body
+        carried = ""
+        is_last = index == len(sections) - 1
+        if len(content) < MIN_SECTION_CHARS and not is_last:
+            carried = f"{label}\n{content}" if label else content
+            continue
+        prefix = f"{context}\n\n"
+        for piece in _pack_lines(content, max(200, chunk_size - len(prefix))):
+            chunks.append((prefix + piece, " > ".join(path[1:])))
+    return chunks
+
+
 def batched(items: list[Item], batch_size: int) -> Iterator[list[Item]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
@@ -102,6 +178,11 @@ class KnowledgeBase:
                 collection_name=self.settings.qdrant_collection,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
+        self.qdrant.create_payload_index(
+            collection_name=self.settings.qdrant_collection,
+            field_name="source_id",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
         self.qdrant.create_payload_index(
             collection_name=self.settings.qdrant_collection,
             field_name="text",
@@ -167,12 +248,14 @@ class KnowledgeBase:
             ],
         )
 
-    def index(self, documents: list[DocumentChunk]) -> int:
+    def index(
+        self, documents: list[DocumentChunk], prune_prefixes: tuple[str, ...] = ()
+    ) -> int:
         self.ensure_collection()
         expanded = [
-            (document, part)
+            (document, part, heading)
             for document in documents
-            for part in chunk_text(document.text)
+            for part, heading in chunk_document(document.source_label, document.text)
         ]
         if not expanded:
             return 0
@@ -180,11 +263,11 @@ class KnowledgeBase:
         for batch in batched(expanded, EMBEDDING_BATCH_SIZE):
             vectors.extend(
                 self.openai.embeddings.create(
-                    model=self.settings.embedding_model, input=[part for _, part in batch]
+                    model=self.settings.embedding_model, input=[part for _, part, _ in batch]
                 ).data
             )
         points = []
-        for (document, part), vector in zip(expanded, vectors, strict=True):
+        for (document, part, heading), vector in zip(expanded, vectors, strict=True):
             digest = hashlib.sha256(part.encode("utf-8")).hexdigest()
             point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.source_id}:{digest}"))
             points.append(
@@ -192,7 +275,9 @@ class KnowledgeBase:
                     id=point_id,
                     vector=vector.embedding,
                     payload={
+                        "source_id": document.source_id,
                         "source_label": document.source_label,
+                        "heading": heading,
                         "source_url": document.source_url,
                         "text": part,
                     },
@@ -200,7 +285,46 @@ class KnowledgeBase:
             )
         for batch in batched(points, QDRANT_UPSERT_BATCH_SIZE):
             self.qdrant.upsert(collection_name=self.settings.qdrant_collection, points=batch)
+        for prefix in prune_prefixes:
+            if any(document.source_id.startswith(prefix) for document in documents):
+                self.prune_stale(prefix, {str(point.id) for point in points})
         return len(points)
+
+    def prune_stale(self, prefix: str, keep_ids: set[str]) -> int:
+        """Delete points of one source kind that were not produced by the current run.
+
+        Points indexed before source_id existed are identified by source_url:
+        wiki chunks have one, EPUB chunks do not.
+        """
+        wiki = prefix.startswith("bookstack:")
+        stale: list[str] = []
+        offset = None
+        while True:
+            records, offset = self.qdrant.scroll(
+                collection_name=self.settings.qdrant_collection,
+                limit=512,
+                offset=offset,
+                with_payload=["source_id", "source_url"],
+                with_vectors=False,
+            )
+            for record in records:
+                payload = record.payload or {}
+                source_id = payload.get("source_id")
+                in_scope = (
+                    str(source_id).startswith(prefix)
+                    if source_id
+                    else bool(payload.get("source_url")) == wiki
+                )
+                if in_scope and str(record.id) not in keep_ids:
+                    stale.append(str(record.id))
+            if offset is None:
+                break
+        for batch in batched(stale, STALE_DELETE_BATCH_SIZE):
+            self.qdrant.delete(
+                collection_name=self.settings.qdrant_collection,
+                points_selector=PointIdsList(points=batch),
+            )
+        return len(stale)
 
     @staticmethod
     def search_terms(question: str) -> list[str]:

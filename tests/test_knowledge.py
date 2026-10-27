@@ -3,8 +3,14 @@ import json
 
 import httpx
 
-from allies_bot.ingest import get_bookstack, sync_state_changed, write_sync_state
-from allies_bot.knowledge import QDRANT_UPSERT_BATCH_SIZE, KnowledgeBase, batched, chunk_text
+from allies_bot.ingest import get_bookstack, html_to_text, sync_state_changed, write_sync_state
+from allies_bot.knowledge import (
+    QDRANT_UPSERT_BATCH_SIZE,
+    KnowledgeBase,
+    batched,
+    chunk_document,
+    chunk_text,
+)
 from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 
@@ -224,3 +230,31 @@ def test_get_bookstack_retries_rate_limit(monkeypatch) -> None:
     response = asyncio.run(get_bookstack(client, "/api/pages"))
 
     assert response.status_code == 200
+
+def test_html_to_text_keeps_structure_and_drops_scripts() -> None:
+    html = (
+        "<style>x{}</style><h2>Songs</h2><p>Intro   text</p>"
+        "<ul><li>One</li><li>Two</li></ul>"
+        "<table><tr><th>Name</th><th>Cost</th></tr><tr><td>Cry</td><td>3</td></tr></table>"
+        "<script>alert(1)</script>"
+    )
+    text = html_to_text(html)
+    assert text == "## Songs\n\nIntro text\n\n- One\n- Two\n\nName | Cost\nCry | 3"
+
+
+def test_chunk_document_prefixes_context_and_follows_headings() -> None:
+    body_a = "Alpha rule. " * 40
+    body_b = "Beta rule. " * 40
+    text = f"# Spells\n\n## Flame\n{body_a}\n## Frost\n{body_b}"
+    chunks = chunk_document("Magic", text)
+    assert [heading for _, heading in chunks] == ["Spells > Flame", "Spells > Frost"]
+    assert chunks[0][0].startswith("Magic > Spells > Flame\n\n")
+    assert "Beta" not in chunks[0][0]
+
+
+def test_chunk_document_merges_tiny_sections_and_splits_long_ones() -> None:
+    text = "## A\nshort\n## B\n" + "\n".join(f"line {i} " + "x" * 80 for i in range(40))
+    chunks = chunk_document("Page", text, chunk_size=500)
+    assert "short" in chunks[0][0] and "line 0" in chunks[0][0]
+    assert len(chunks) > 1
+    assert all(len(text) <= 500 for text, _ in chunks)

@@ -88,11 +88,12 @@ def test_keyword_score_prefers_damage_to_endurance() -> None:
     )
 
 
-def test_source_key_deduplicates_chunks_from_one_page() -> None:
+def test_source_key_keeps_distinct_chunks_from_one_page() -> None:
     first_chunk = {"source_label": "Judgment Family", "source_url": "https://wiki.test/judgment", "text": "Gavel"}
     second_chunk = {"source_label": "Judgment Family", "source_url": "https://wiki.test/judgment", "text": "Coal"}
 
-    assert KnowledgeBase._source_key(first_chunk) == KnowledgeBase._source_key(second_chunk)
+    assert KnowledgeBase._source_key(first_chunk) != KnowledgeBase._source_key(second_chunk)
+    assert KnowledgeBase._source_key(first_chunk) == KnowledgeBase._source_key(dict(first_chunk))
 
 
 def test_direct_rule_phrases_include_judgment_wording() -> None:

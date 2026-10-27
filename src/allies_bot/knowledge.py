@@ -29,9 +29,9 @@ EMBEDDING_BATCH_SIZE = 128
 QDRANT_UPSERT_BATCH_SIZE = 64
 CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
-SEARCH_RESULT_LIMIT = 5
-KEYWORD_RESULT_LIMIT = 32
-DIRECT_RULE_RESULT_LIMIT = 64
+SEARCH_RESULT_LIMIT = 8
+KEYWORD_RESULT_LIMIT = 40
+DIRECT_RULE_SCAN_LIMIT = 2000
 SONG_FAMILY_LABELS = frozenset({
     "cry family",
     "fear family",
@@ -41,6 +41,7 @@ SONG_FAMILY_LABELS = frozenset({
 })
 SEARCH_STOPWORDS = frozenset([
     "about", "after", "asked", "asks", "before", "being", "does", "doing", "from",
+    "all", "are", "can", "cause", "causes", "ways", "the", "other", "any", "list", "has",
     "have", "how", "into", "made", "make", "more", "most", "that",
     "than", "them", "there", "these", "they", "things", "what", "when", "which", "with",
     "would", "your",
@@ -349,7 +350,12 @@ class KnowledgeBase:
                     proximity += 1
         return distinct_terms, proximity, occurrences
 
-    def search(self, question: str, limit: int = SEARCH_RESULT_LIMIT) -> list[dict[str, str | None]]:
+    def search(
+        self,
+        question: str,
+        limit: int = SEARCH_RESULT_LIMIT,
+        exclude_enemy: bool = False,
+    ) -> list[dict[str, str | None]]:
         self.ensure_collection()
         vector = self.openai.embeddings.create(
             model=self.settings.embedding_model, input=question
@@ -363,6 +369,8 @@ class KnowledgeBase:
         seen: set[str] = set()
         for point in result.points:
             source = point.payload
+            if exclude_enemy and self.is_enemy_source(source):
+                continue
             key = self._source_key(source)
             if key not in seen:
                 semantic.append(source)
@@ -379,12 +387,15 @@ class KnowledgeBase:
         keyword_sources: dict[str, dict[str, str | None]] = {}
         for point in keyword_result.points:
             source = point.payload
+            if exclude_enemy and self.is_enemy_source(source):
+                continue
             key = self._source_key(source)
             existing = keyword_sources.get(key)
             if existing is None or self.keyword_score(source, terms) > self.keyword_score(
                 existing, terms
             ):
                 keyword_sources[key] = source
+        direct_keys: set[str] = set()
         attribute_terms = [term for term in terms if term in {"endurance", "resolve", "passion"}]
         for attribute in attribute_terms:
             phrases = (
@@ -396,20 +407,27 @@ class KnowledgeBase:
                 f"lowers {attribute}",
                 f"puts {attribute}",
             )
-            direct_result = self.qdrant.query_points(
+            candidates, _ = self.qdrant.scroll(
                 collection_name=self.settings.qdrant_collection,
-                query=vector,
-                query_filter=Filter(
+                scroll_filter=Filter(
                     should=[
                         FieldCondition(key="text", match=MatchText(text=phrase))
                         for phrase in phrases
                     ]
                 ),
-                limit=DIRECT_RULE_RESULT_LIMIT,
+                limit=DIRECT_RULE_SCAN_LIMIT,
+                with_payload=True,
+                with_vectors=False,
             )
-            for point in direct_result.points:
+            exact = (*phrases, f"{attribute} damage")
+            for point in candidates:
                 source = point.payload
+                if not any(phrase in str(source.get("text")).lower() for phrase in exact):
+                    continue
+                if exclude_enemy and self.is_enemy_source(source):
+                    continue
                 key = self._source_key(source)
+                direct_keys.add(key)
                 existing = keyword_sources.get(key)
                 if existing is None or self.keyword_score(source, terms) > self.keyword_score(
                     existing, terms
@@ -419,7 +437,7 @@ class KnowledgeBase:
             source
             for _, source in sorted(
                 keyword_sources.items(),
-                key=lambda item: self.keyword_score(item[1], terms),
+                key=lambda item: (item[0] in direct_keys, self.keyword_score(item[1], terms)),
                 reverse=True,
             )
             if self._source_key(source) not in seen
@@ -430,7 +448,8 @@ class KnowledgeBase:
 
     @staticmethod
     def _source_key(source: dict[str, str | None]) -> str:
-        return str(source.get("source_url") or source.get("source_label") or source.get("text"))
+        page = source.get("source_url") or source.get("source_label")
+        return f"{page}\n{source.get('text')}"
 
     @staticmethod
     def is_character_creation_question(question: str) -> bool:
@@ -483,7 +502,7 @@ class KnowledgeBase:
                 + ("Songs Song Families" if minstrel_question else "Spiritual Effects different Families")
                 + " Progression 1 Order eligibility learn"
             )
-        sources = self.search(retrieval_query)
+        sources = self.search(retrieval_query, exclude_enemy=not explicit_enemy_request)
         if not explicit_enemy_request:
             sources = [source for source in sources if not self.is_enemy_source(source)]
         if character_creation:

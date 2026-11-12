@@ -36,6 +36,10 @@ answer_deadline: ContextVar[float | None] = ContextVar("answer_deadline", defaul
 logger = logging.getLogger(__name__)
 
 
+class FollowupResolutionError(ValueError):
+    """The history resolver did not produce a usable retrieval question."""
+
+
 def request_timeout(stage: str, maximum: float) -> float:
     deadline = answer_deadline.get()
     remaining = maximum if deadline is None else min(maximum, deadline - time.monotonic())
@@ -342,9 +346,9 @@ class KnowledgeBase:
         if not history:
             return question
         result = self.openai.chat.completions.create(
-            model=self.settings.chat_model,
+            model=self.settings.followup_model,
             timeout=request_timeout("follow-up resolution", 15),
-            max_completion_tokens=512,
+            max_completion_tokens=4096,
             messages=[
                 {"role": "system", "content": (
                     "Rewrite the latest user question as a standalone retrieval question. "
@@ -361,9 +365,11 @@ class KnowledgeBase:
         )
         resolved = result.choices[0].message.content
         if result.choices[0].finish_reason == "length":
-            raise ValueError("Follow-up resolution exceeded its output limit.")
+            raise FollowupResolutionError("Follow-up resolution exceeded its output limit.")
         if not resolved or not resolved.strip():
-            raise ValueError("Could not resolve the follow-up question from conversation history.")
+            raise FollowupResolutionError(
+                "Could not resolve the follow-up question from conversation history.",
+            )
         return resolved.strip()
 
     def index(

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     allowed_channel_ids: str
     openai_api_key: str
     chat_model: str = "gpt-4.1"
+    followup_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
     qdrant_url: str
     qdrant_api_key: str

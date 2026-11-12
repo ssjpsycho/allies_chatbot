@@ -151,3 +151,18 @@ def test_timed_out_answer_reports_failure_without_saving(bot_module):
     asyncio.run(module.ask.callback(request, "Question"))
     assert "timed out" in request.followup.send.call_args.args[0]
     assert not saved
+
+
+def test_resolution_error_is_not_reported_as_connection_failure(bot_module):
+    module = bot_module
+    module.bot.knowledge.load_conversation = lambda key: []
+
+    def answer(*args):
+        raise knowledge.FollowupResolutionError("Follow-up resolution exceeded its output limit.")
+
+    module.bot.knowledge.answer = answer
+    request = interaction()
+    asyncio.run(module.ask.callback(request, "What about it?"))
+    message = request.followup.send.call_args.args[0]
+    assert "specific effect or topic name" in message
+    assert "could not reach" not in message

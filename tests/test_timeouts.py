@@ -38,7 +38,7 @@ def test_answer_establishes_and_cleans_up_request_deadline_on_error():
 
 def test_followup_rewrite_is_time_and_output_bounded():
     kb = KnowledgeBase.__new__(KnowledgeBase)
-    kb.settings = SimpleNamespace(chat_model="chat")
+    kb.settings = SimpleNamespace(chat_model="chat", followup_model="rewrite")
     captured = {}
 
     def complete(**kwargs):
@@ -52,12 +52,13 @@ def test_followup_rewrite_is_time_and_output_bounded():
         ConversationMessage("user", "Manna?", "2026-11-12"),
     ]) == "Standalone question"
     assert captured["timeout"] <= 15
-    assert captured["max_completion_tokens"] == 512
+    assert captured["max_completion_tokens"] == 4096
+    assert captured["model"] == "rewrite"
 
 
 def test_incomplete_rewrite_is_not_used_for_retrieval():
     kb = KnowledgeBase.__new__(KnowledgeBase)
-    kb.settings = SimpleNamespace(chat_model="chat")
+    kb.settings = SimpleNamespace(chat_model="chat", followup_model="rewrite")
     kb.openai = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
         create=lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(
             finish_reason="length", message=SimpleNamespace(content="Incomplete"),

@@ -8,7 +8,7 @@ from discord import app_commands
 from openai import APITimeoutError
 
 from allies_bot.config import Settings
-from allies_bot.knowledge import ANSWER_BUDGET_SECONDS, KnowledgeBase
+from allies_bot.knowledge import ANSWER_BUDGET_SECONDS, FollowupResolutionError, KnowledgeBase
 from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,14 @@ async def answer_question(
         answer, sources = await worker
         logger.info("Discord answer elapsed_seconds=%.3f budget_seconds=%d",
                     time.monotonic() - started, ANSWER_BUDGET_SECONDS)
+    except FollowupResolutionError:
+        logger.exception("Could not resolve follow-up question")
+        await interaction.followup.send(
+            "I could not resolve this question from the conversation history. "
+            "Please repeat it with the specific effect or topic name. "
+            "Your previous history is still saved."
+        )
+        return
     except (TimeoutError, APITimeoutError):
         logger.exception("Timed out while answering Discord question")
         await interaction.followup.send(
@@ -141,4 +149,6 @@ async def sources(interaction: discord.Interaction) -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     bot.run(settings.discord_token)

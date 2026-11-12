@@ -8,7 +8,8 @@ from allies_bot.knowledge import ConversationMessage, KnowledgeBase
 def memory():
     kb = KnowledgeBase.__new__(KnowledgeBase)
     kb.settings = SimpleNamespace(
-        qdrant_collection="rules", chat_model="chat", embedding_model="embedding",
+        qdrant_collection="rules", chat_model="chat", followup_model="rewrite",
+        embedding_model="embedding",
     )
     kb.ensure_memory_collection = lambda: None
     return kb

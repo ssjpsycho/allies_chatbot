@@ -144,6 +144,12 @@ Simultaneous questions in the same conversation are serialized by the bot.
 Follow-up references are resolved into a standalone retrieval question before
 search and Order/variant filtering. A new topic should not inherit old constraints.
 Both user and assistant messages are supplied to the answer model in order.
+The resolver uses `FOLLOWUP_MODEL` (default `gpt-4.1-mini`) independently of
+`CHAT_MODEL`. Use a fast, non-reasoning model for this short rewriting task:
+reasoning tokens share `max_completion_tokens` and can consume a small output
+budget without producing a retrieval question. The resolver allows 4,096 tokens
+but asks for only one question; incomplete output is never searched silently.
+Resolution failures receive a specific user message, not a connection-error message.
 
 If history cannot be loaded, the bot reports the problem rather than silently
 answering without context. If saving fails, it warns that the next question may

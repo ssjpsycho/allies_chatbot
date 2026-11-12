@@ -3,7 +3,13 @@ import json
 
 import httpx
 
-from allies_bot.ingest import get_bookstack, html_to_text, sync_state_changed, write_sync_state
+from allies_bot.ingest import (
+    INGESTION_VERSION,
+    get_bookstack,
+    html_to_text,
+    sync_state_changed,
+    write_sync_state,
+)
 from allies_bot.knowledge import (
     QDRANT_UPSERT_BATCH_SIZE,
     KnowledgeBase,
@@ -172,7 +178,9 @@ def test_sync_state_detects_changes(tmp_path) -> None:
     write_sync_state(state_path, "first")
     assert not sync_state_changed(state_path, "first")
     assert sync_state_changed(state_path, "second")
-    assert json.loads(state_path.read_text()) == {"wiki_fingerprint": "first"}
+    assert json.loads(state_path.read_text()) == {
+        "wiki_fingerprint": "first", "ingestion_version": INGESTION_VERSION,
+    }
 
 
 def test_character_build_retrieval_requests_first_tier_effects() -> None:
@@ -240,7 +248,10 @@ def test_html_to_text_keeps_structure_and_drops_scripts() -> None:
         "<script>alert(1)</script>"
     )
     text = html_to_text(html)
-    assert text == "## Songs\n\nIntro text\n\n- One\n- Two\n\nName | Cost\nCry | 3"
+    assert text == (
+        "## Songs\n\nIntro text\n\n- One\n- Two\n\n"
+        "Table; Row: Cry; Column: Name\tCry\nTable; Row: Cry; Column: Cost\t3"
+    )
 
 
 def test_chunk_document_prefixes_context_and_follows_headings() -> None:

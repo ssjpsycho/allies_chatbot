@@ -31,7 +31,13 @@ CONVERSATION_MEMORY_LIMIT = 8
 CONVERSATION_VECTOR_SIZE = 1
 SEARCH_RESULT_LIMIT = 8
 KEYWORD_RESULT_LIMIT = 40
-DIRECT_RULE_SCAN_LIMIT = 2000
+DIRECT_RULE_SCAN_LIMIT = 256
+ORDER_RULE_PAGES = {
+    "warrior": "Warriors",
+    "messenger": "Messengers",
+    "ministering spirit": "Ministering Spirits",
+    "minstrel": "Minstrels",
+}
 SONG_FAMILY_LABELS = frozenset({
     "cry family",
     "fear family",
@@ -120,7 +126,17 @@ def _pack_lines(body: str, budget: int) -> list[str]:
     pieces: list[str] = []
     current = ""
     for line in body.split("\n"):
-        for part in chunk_text(line, budget, overlap=100) if len(line) > budget else [line]:
+        context, separator, value = line.partition("\t") if line.startswith("Table") else ("", "", line)
+        prefix = context + "\t" if separator else ""
+        available = budget - len(prefix)
+        if available < 20:
+            raise ValueError("Table context exceeds the chunk budget; cannot preserve associations.")
+        parts = (
+            chunk_text(value, available, overlap=min(100, available // 4))
+            if len(value) > available else [value]
+        )
+        for value_part in parts:
+            part = prefix + value_part
             if current and len(current) + len(part) + 1 > budget:
                 pieces.append(current.strip())
                 current = ""
@@ -182,6 +198,11 @@ class KnowledgeBase:
         self.qdrant.create_payload_index(
             collection_name=self.settings.qdrant_collection,
             field_name="source_id",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        self.qdrant.create_payload_index(
+            collection_name=self.settings.qdrant_collection,
+            field_name="source_label",
             field_schema=PayloadSchemaType.KEYWORD,
         )
         self.qdrant.create_payload_index(
@@ -254,9 +275,11 @@ class KnowledgeBase:
     ) -> int:
         self.ensure_collection()
         expanded = [
-            (document, part, heading)
+            (document, part, heading, index)
             for document in documents
-            for part, heading in chunk_document(document.source_label, document.text)
+            for index, (part, heading) in enumerate(
+                chunk_document(document.source_label, document.text)
+            )
         ]
         if not expanded:
             return 0
@@ -264,11 +287,11 @@ class KnowledgeBase:
         for batch in batched(expanded, EMBEDDING_BATCH_SIZE):
             vectors.extend(
                 self.openai.embeddings.create(
-                    model=self.settings.embedding_model, input=[part for _, part, _ in batch]
+                    model=self.settings.embedding_model, input=[part for _, part, _, _ in batch]
                 ).data
             )
         points = []
-        for (document, part, heading), vector in zip(expanded, vectors, strict=True):
+        for (document, part, heading, index), vector in zip(expanded, vectors, strict=True):
             digest = hashlib.sha256(part.encode("utf-8")).hexdigest()
             point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.source_id}:{digest}"))
             points.append(
@@ -279,6 +302,7 @@ class KnowledgeBase:
                         "source_id": document.source_id,
                         "source_label": document.source_label,
                         "heading": heading,
+                        "chunk_index": str(index),
                         "source_url": document.source_url,
                         "text": part,
                     },
@@ -396,7 +420,13 @@ class KnowledgeBase:
             ):
                 keyword_sources[key] = source
         direct_keys: set[str] = set()
-        attribute_terms = [term for term in terms if term in {"endurance", "resolve", "passion"}]
+        damage_question = bool(re.search(
+            r"\b(?:damag\w*|lower\w*|reduc\w*|harm\w*)\b", question, re.IGNORECASE,
+        ))
+        attribute_terms = [
+            term for term in terms
+            if damage_question and term in {"endurance", "resolve", "passion"}
+        ]
         for attribute in attribute_terms:
             phrases = (
                 f"damage {attribute}",
@@ -407,44 +437,154 @@ class KnowledgeBase:
                 f"lowers {attribute}",
                 f"puts {attribute}",
             )
-            candidates, _ = self.qdrant.scroll(
-                collection_name=self.settings.qdrant_collection,
-                scroll_filter=Filter(
-                    should=[
-                        FieldCondition(key="text", match=MatchText(text=phrase))
-                        for phrase in phrases
-                    ]
-                ),
-                limit=DIRECT_RULE_SCAN_LIMIT,
-                with_payload=True,
-                with_vectors=False,
-            )
             exact = (*phrases, f"{attribute} damage")
-            for point in candidates:
-                source = point.payload
-                if not any(phrase in str(source.get("text")).lower() for phrase in exact):
-                    continue
-                if exclude_enemy and self.is_enemy_source(source):
-                    continue
-                key = self._source_key(source)
-                direct_keys.add(key)
-                existing = keyword_sources.get(key)
-                if existing is None or self.keyword_score(source, terms) > self.keyword_score(
-                    existing, terms
-                ):
+            offset = None
+            while True:
+                candidates, offset = self.qdrant.scroll(
+                    collection_name=self.settings.qdrant_collection,
+                    scroll_filter=Filter(
+                        should=[
+                            FieldCondition(key="text", match=MatchText(text=phrase))
+                            for phrase in exact
+                        ]
+                    ),
+                    limit=DIRECT_RULE_SCAN_LIMIT, offset=offset,
+                    with_payload=True, with_vectors=False,
+                )
+                for point in candidates:
+                    source = point.payload
+                    if not any(phrase in str(source.get("text")).lower() for phrase in exact):
+                        continue
+                    if exclude_enemy and self.is_enemy_source(source):
+                        continue
+                    key = self._source_key(source)
+                    direct_keys.add(key)
                     keyword_sources[key] = source
-        keyword_matches = [
+                if offset is None:
+                    break
+        # A semantic hit must not be demoted merely because it was seen first.
+        keyword_sources.update({self._source_key(source): source for source in semantic})
+        ranked = [
             source
             for _, source in sorted(
                 keyword_sources.items(),
                 key=lambda item: (item[0] in direct_keys, self.keyword_score(item[1], terms)),
                 reverse=True,
             )
-            if self._source_key(source) not in seen
         ]
-        for source in keyword_matches:
-            seen.add(self._source_key(source))
-        return (keyword_matches + semantic)[: limit + KEYWORD_RESULT_LIMIT]
+        direct = [source for source in ranked if self._source_key(source) in direct_keys]
+        other = [source for source in ranked if self._source_key(source) not in direct_keys]
+        return direct + other[:max(0, limit + KEYWORD_RESULT_LIMIT - len(direct))]
+
+    def source_chunks(self, label: str) -> list[dict[str, str | None]]:
+        """Read a complete named source, not a vector-ranked subset of its tables."""
+        self.ensure_collection()
+        sources = []
+        offset = None
+        while True:
+            records, offset = self.qdrant.scroll(
+                collection_name=self.settings.qdrant_collection,
+                scroll_filter=Filter(must=[
+                    FieldCondition(key="source_label", match=MatchValue(value=label)),
+                ]),
+                limit=256, offset=offset, with_payload=True, with_vectors=False,
+            )
+            sources.extend(record.payload for record in records)
+            if offset is None:
+                break
+        return sorted(sources, key=lambda source: (
+            int(source.get("chunk_index") or 0), str(source.get("text") or ""),
+        ))
+
+    @staticmethod
+    def requested_orders(question: str) -> list[str]:
+        return [
+            order for order in ORDER_RULE_PAGES
+            if re.search(rf"\b{order}s?\b", question, re.IGNORECASE)
+        ]
+
+    @staticmethod
+    def requests_enemy_sources(question: str) -> bool:
+        return bool(re.search(
+            r"\b(?:unholy|corrupt(?:ion|ed)?|enemy|enemies|evil|minions?)\b",
+            question, re.IGNORECASE,
+        ))
+
+    @staticmethod
+    def order_source_allowed(source: dict[str, str | None], question: str) -> bool:
+        requested = KnowledgeBase.requested_orders(question)
+        if not requested:
+            return True
+        label = str(source.get("source_label") or "")
+        explicitly_named = (
+            label.lower() in question.lower()
+            or label.lower().removesuffix(" family") in question.lower()
+        ) if label else False
+        if (
+            KnowledgeBase.is_song_family_source(source) and "minstrel" not in requested
+            and not explicitly_named and not re.search(r"\bsongs?\b", question, re.IGNORECASE)
+        ):
+            return False
+        discipline = re.search(r"\((.+) Discipline\)", label, re.IGNORECASE)
+        if not discipline:
+            owners = KnowledgeBase.requested_orders(label)
+            if len(owners) > 1 and not explicitly_named:
+                return all(owner in requested for owner in owners)
+            return True
+        name = label.split("(", 1)[0].strip().lower()
+        if name and name in question.lower():
+            return True
+        owners = KnowledgeBase.requested_orders(discipline.group(1))
+        return not owners or all(owner in requested for owner in owners)
+
+    @staticmethod
+    def stat_card_answer(
+        label: str, sources: list[dict[str, str | None]], question: str,
+    ) -> str | None:
+        """Render broad numeric stat requests without lossy model summarisation."""
+        if not re.search(r"\b(?:attributes|stats|stat blocks?)\b", question, re.IGNORECASE):
+            return None
+        if re.search(
+            r"\b(?:compar\w*|versus|vs|differ\w*|increas\w*|decreas\w*|higher|lower|why|how)\b",
+            question, re.IGNORECASE,
+        ):
+            return None
+        cards: dict[str, dict[str, str]] = {}
+        for source in sources:
+            if source.get("source_label") != label:
+                continue
+            for line in str(source.get("text") or "").splitlines():
+                match = re.fullmatch(
+                    r"Table: (.+? \(ML:\d+\)); Row: (.+?); Column 2\t(.+)", line,
+                )
+                if not match:
+                    continue
+                group, field, value = match.groups()
+                fields = cards.setdefault(group, {})
+                if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", value):
+                    if field in fields and fields[field] != value:
+                        raise ValueError(f"Conflicting source values for {group}: {field}")
+                    fields[field] = value
+        if not cards:
+            return None
+        # Specific type questions still need the normal question-answering path.
+        for group in cards:
+            name = group.split(" (ML:", 1)[0]
+            if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", question, re.IGNORECASE):
+                return None
+        if KnowledgeBase.requested_orders(question):
+            return None
+        if any(not fields for fields in cards.values()):
+            raise ValueError(f"Some {label} stat cards have no numeric attributes.")
+        return (
+            f"{label}: numeric attributes from all {len(cards)} indexed stat cards.\n\n"
+            + "\n\n".join(
+                f"{group}\n" + "; ".join(f"{field}: {value}" for field, value in fields.items())
+                for group, fields in cards.items()
+            )
+            + "\n\nValues are copied from the source cards. Equipment and ability slots are "
+            "not numeric attributes and are not listed here. Empty cells are not treated as zero."
+        )
 
     @staticmethod
     def _source_key(source: dict[str, str | None]) -> str:
@@ -493,9 +633,10 @@ class KnowledgeBase:
         retrieval_query = "\n".join([message.content for message in history[-4:]] + [question])
         character_creation = self.is_character_creation_question(question)
         minstrel_question = self.is_minstrel_question(question)
-        explicit_enemy_request = any(
-            term in question.lower() for term in ("unholy", "corrupt", "corruption", "enemy", "evil")
+        intent = "\n".join(
+            [message.content for message in history[-4:] if message.role == "user"] + [question]
         )
+        explicit_enemy_request = self.requests_enemy_sources(intent)
         if character_creation:
             retrieval_query += (
                 "\ncharacter creation select 3 first Tier 1 "
@@ -503,8 +644,21 @@ class KnowledgeBase:
                 + " Progression 1 Order eligibility learn"
             )
         sources = self.search(retrieval_query, exclude_enemy=not explicit_enemy_request)
+        # Resolve explicit level requests even if the page was absent from top-k results.
+        minion = re.search(r"\bminions?\s+level\s*:?\s*(\d+)\b", intent, re.IGNORECASE)
+        labels = {str(source.get("source_label") or "") for source in sources}
+        named = {
+            label for label in labels if label and label.lower() in intent.lower()
+        }
+        if minion:
+            named.add(f"Minion Level: {int(minion.group(1))}")
+        for label in sorted(named):
+            full = self.source_chunks(label)
+            if full:
+                sources = full + [s for s in sources if s.get("source_label") != label]
         if not explicit_enemy_request:
             sources = [source for source in sources if not self.is_enemy_source(source)]
+        sources = [source for source in sources if self.order_source_allowed(source, intent)]
         if character_creation:
             sources = [
                 source
@@ -517,11 +671,38 @@ class KnowledgeBase:
                 )
                 and (minstrel_question or not self.is_minstrel_source(source))
             ]
+        orders = self.requested_orders(intent)
+        rule_labels = {ORDER_RULE_PAGES[order] for order in orders}
+        if orders:
+            rule_labels.update(
+                str(source["source_label"]) for source in sources
+                if "Column: Usable By\t" in str(source.get("text") or "")
+            )
+        for label in sorted(rule_labels):
+            rules = self.source_chunks(label)
+            known = {self._source_key(source) for source in sources}
+            sources.extend(source for source in rules if self._source_key(source) not in known)
         if not sources:
             return "I do not have indexed source material to answer that yet.", []
+        if minion:
+            stats = self.stat_card_answer(
+                f"Minion Level: {int(minion.group(1))}", sources, question,
+            )
+            if stats is not None:
+                return stats, sources
         context = "\n\n".join(
             f"Source: {source['source_label']}\n{source['text']}" for source in sources
         )
+        table_groups = list(dict.fromkeys(
+            match.group(1)
+            for source in sources if source.get("source_label") in named
+            for match in re.finditer(r"^Table: (.+?); Row:", str(source.get("text")), re.MULTILINE)
+        ))
+        if table_groups:
+            context += (
+                "\n\nNamed-source table coverage checklist (not additional rules):\n"
+                + "\n".join(f"- {group}" for group in table_groups)
+            )
         conversation = "\n".join(
             f"{message.role.title()}: {message.content}" for message in history
         )
@@ -540,8 +721,36 @@ class KnowledgeBase:
                         "distinct source page that contains an explicit matching rule; do not omit "
                         "a page merely because another page describes a similar effect. Label any "
                         "remaining inference separately, and do not claim a complete list unless "
-                        "the excerpts establish completeness. For character-building questions, "
-                        "separate Spiritual Effects from Songs and verify that the character's "
+                        "the excerpts establish completeness. "
+                        "For EVERY question scoped to an Order, including lists of damage options, "
+                        "verify eligibility using the supplied Order rules. A rule for another "
+                        "Order or its Discipline is not a general option for the requested Order. "
+                        "Do not include it as an available method; if discussing it explicitly, "
+                        "state the restriction. General weapon and social rules may also contain "
+                        "Order-specific exceptions: do not transfer these exceptions. "
+                        "In weapon Usable By columns, W = Warrior, Me = Messenger, "
+                        "MS = Ministering Spirit, Mi = Minstrel. Me is NOT Ministering Spirit. "
+                        "A weapon whose Usable By list omits the requested Order is not an "
+                        "available method for that single Order. Check the weapon's Usable By "
+                        "row AND the Character Creation Notes before recommending its effects. "
+                        "For tables, keep Table/Row/Column labels together. Combine all supplied "
+                        "chunks of a named source before reporting its rows. Never call a field "
+                        "missing until checking every supplied chunk for that same Table and Row. "
+                        "An (empty) source cell is unspecified, not zero or permission. "
+                        "Preserve the exact Family and heading in each attribution. "
+                        "When a question asks broadly for attributes/stats of a named source, "
+                        "cover every relevant group in the named-source table coverage checklist, "
+                        "including multi-Order and bestial variants. Use compact tables, not a "
+                        "representative subset followed by an offer to provide the rest. "
+                        "Exclude only groups the user explicitly scoped out. "
+                        "Do not claim all rules were searched just because direct wording matched; "
+                        "indirect effects and eligibility may remain unverified. "
+                        "For lists of available methods, introduce them as 'Methods supported by "
+                        "the retrieved rules', never as a comprehensive or exhaustive list of all "
+                        "ways in the game. End with a brief coverage note that indirect methods "
+                        "may require further review. Do not invent Host-adjudication options. "
+                        "For character-building questions, separate Spiritual Effects from Songs "
+                        "and verify that the character's "
                         "Order or discipline can learn each recommendation. Do not recommend a "
                         "Song to a non-Minstrel, and do not treat a Minstrel-only option as a "
                         "general Ministering Spirit option. If eligibility is not explicit in the "

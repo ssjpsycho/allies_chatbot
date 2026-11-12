@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import re
+from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,11 @@ from ebooklib import ITEM_DOCUMENT, epub
 
 from allies_bot.config import Settings
 from allies_bot.knowledge import DocumentChunk, KnowledgeBase
+from allies_bot.tables import TableExtractor
 
 REQUEST_DELAY_SECONDS = 0.5
 MAX_RETRIES = 6
+INGESTION_VERSION = 3
 
 
 SKIPPED_TAGS = frozenset({"script", "style", "head", "noscript"})
@@ -32,11 +35,24 @@ class TextExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.skip_depth = 0
+        self.table_depth = 0
+        self.table: TableExtractor | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in SKIPPED_TAGS:
             self.skip_depth += 1
-        elif tag in HEADING_TAGS:
+            return
+        if self.skip_depth:
+            return
+        if tag == "table":
+            if not self.table_depth:
+                self.table = TableExtractor()
+                self.parts.append("\n\n")
+            self.table_depth += 1
+        if self.table is not None:
+            self.table.feed(self.get_starttag_text())
+            return
+        if tag in HEADING_TAGS:
             self.parts.append("\n\n" + "#" * HEADING_TAGS[tag] + " ")
         elif tag == "li":
             self.parts.append("\n- ")
@@ -46,7 +62,19 @@ class TextExtractor(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in SKIPPED_TAGS:
             self.skip_depth = max(0, self.skip_depth - 1)
-        elif tag in HEADING_TAGS:
+            return
+        if self.skip_depth:
+            return
+        if self.table is not None:
+            self.table.feed(f"</{tag}>")
+            if tag == "table":
+                self.table_depth -= 1
+                if not self.table_depth:
+                    self.table.close()
+                    self.parts.append("\n".join(self.table.output) + "\n\n")
+                    self.table = None
+            return
+        if tag in HEADING_TAGS:
             self.parts.append("\n\n")
         elif tag in {"td", "th"}:
             self.parts.append(" | ")
@@ -55,9 +83,14 @@ class TextExtractor(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if not self.skip_depth:
-            self.parts.append(re.sub(r"\s+", " ", data))
+            if self.table is not None:
+                self.table.feed(escape(data))
+            else:
+                self.parts.append(re.sub(r"\s+", " ", data))
 
     def text(self) -> str:
+        if self.table is not None:
+            raise ValueError("Unclosed HTML table; ingestion stopped to avoid losing content.")
         lines = []
         for line in "".join(self.parts).split("\n"):
             line = line.strip()
@@ -158,12 +191,17 @@ def sync_state_changed(state_path: Path, fingerprint: str) -> bool:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return True
-    return state.get("wiki_fingerprint") != fingerprint
+    return (
+        state.get("wiki_fingerprint") != fingerprint
+        or state.get("ingestion_version") != INGESTION_VERSION
+    )
 
 
 def write_sync_state(state_path: Path, fingerprint: str) -> None:
     state_path.write_text(
-        json.dumps({"wiki_fingerprint": fingerprint}, indent=2) + "\n",
+        json.dumps({
+            "wiki_fingerprint": fingerprint, "ingestion_version": INGESTION_VERSION,
+        }, indent=2) + "\n",
         encoding="utf-8",
     )
 

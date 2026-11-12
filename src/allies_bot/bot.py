@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from datetime import UTC, datetime
+from weakref import WeakValueDictionary
 
 import discord
 from discord import app_commands
 
 from allies_bot.config import Settings
-from allies_bot.knowledge import ConversationMessage, KnowledgeBase
+from allies_bot.knowledge import KnowledgeBase
 from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ class AlliesBot(discord.Client):
         self.settings = settings
         self.knowledge = KnowledgeBase(settings)
         self.tree = app_commands.CommandTree(self)
+        self.conversation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     async def setup_hook(self) -> None:
         if self.settings.discord_guild_id:
@@ -45,16 +46,31 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
         return
     await interaction.response.defer(thinking=True)
     conversation_key = f"{interaction.guild_id or 0}:{interaction.channel_id}:{interaction.user.id}"
-    history = []
+    lock = bot.conversation_locks.setdefault(conversation_key, asyncio.Lock())
+    async with lock:
+        await answer_question(interaction, question, conversation_key)
+
+
+async def answer_question(
+    interaction: discord.Interaction, question: str, conversation_key: str,
+) -> None:
     try:
         history = await asyncio.wait_for(
             asyncio.to_thread(bot.knowledge.load_conversation, conversation_key),
             timeout=BACKEND_TIMEOUT_SECONDS,
         )
     except TimeoutError:
-        logger.exception("Timed out while loading conversation memory; continuing without history")
+        logger.exception("Timed out while loading conversation memory")
+        await interaction.followup.send(
+            "I could not load your conversation history in time. Please try again shortly."
+        )
+        return
     except Exception:
-        logger.exception("Failed to load conversation memory; continuing without history")
+        logger.exception("Failed to load conversation memory")
+        await interaction.followup.send(
+            "I could not load your conversation history. Please try again shortly."
+        )
+        return
 
     try:
         answer, sources = await asyncio.wait_for(
@@ -86,25 +102,19 @@ async def ask(interaction: discord.Interaction, question: str) -> None:
     for message in split_for_discord(content):
         await interaction.followup.send(message)
 
-    now = datetime.now(UTC).isoformat()
     try:
         await asyncio.wait_for(
-            asyncio.gather(
-                asyncio.to_thread(
-                    bot.knowledge.save_conversation_message,
-                    conversation_key,
-                    ConversationMessage(role="user", content=question, created_at=now),
-                ),
-                asyncio.to_thread(
-                    bot.knowledge.save_conversation_message,
-                    conversation_key,
-                    ConversationMessage(role="assistant", content=answer, created_at=now),
-                ),
+            asyncio.to_thread(
+                bot.knowledge.save_conversation_turn, conversation_key, question, answer,
             ),
             timeout=MEMORY_WRITE_TIMEOUT_SECONDS,
         )
     except Exception:
         logger.exception("Could not save Discord conversation memory")
+        await interaction.followup.send(
+            "I could not save this exchange to conversation history. Your next question "
+            "may need to repeat the context."
+        )
 
 
 @bot.tree.command(name="sources", description="Show the configured knowledge sources.")

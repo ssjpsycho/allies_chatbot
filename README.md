@@ -129,6 +129,27 @@ The daily sync state also records an ingestion version, so an extractor upgrade
 triggers a wiki refresh even when the source page metadata has not changed.
 Image-only pages have no indexable text; this importer does not perform OCR.
 
+### Conversation history and follow-up questions
+
+Use `/ask` for both the initial question and follow-up questions. The bot retains
+the latest eight exchanges per Discord user, scoped to the same server and channel
+(a thread is its own channel). It does not read other users' histories or arbitrary
+channel messages. History is stored in the separate Qdrant conversation-memory
+collection and survives bot restarts; wiki re-indexing does not replace it.
+
+The loader paginates the matching records before selecting the newest messages,
+since Qdrant's default ID ordering is not time ordering. Each completed exchange
+is written in one acknowledged batch, with the user message before its answer.
+Simultaneous questions in the same conversation are serialized by the bot.
+Follow-up references are resolved into a standalone retrieval question before
+search and Order/variant filtering. A new topic should not inherit old constraints.
+Both user and assistant messages are supplied to the answer model in order.
+
+If history cannot be loaded, the bot reports the problem rather than silently
+answering without context. If saving fails, it warns that the next question may
+need to repeat the context. The eight-exchange context window is not a storage
+retention/deletion policy: older stored records are not automatically deleted.
+
 ### Order eligibility and answer coverage
 
 Order-scoped questions include the requested Order's rule page, not just

@@ -150,6 +150,18 @@ answering without context. If saving fails, it warns that the next question may
 need to repeat the context. The eight-exchange context window is not a storage
 retention/deletion policy: older stored records are not automatically deleted.
 
+Slow answers send a progress message after 20 seconds instead of inviting duplicate
+questions. Answer processing has a 120-second request budget, with separate bounds
+for reference resolution (15 seconds), embedding (15 seconds), Qdrant requests
+(10 seconds) and final generation (up to 75 seconds, limited by remaining budget).
+OpenAI automatic retries are disabled so a transient failure cannot silently
+outlive the answer deadline; an indexing failure must be explicitly rerun.
+The bot waits for the bounded answer worker while retaining its conversation lock,
+rather than cancelling only the waiter and leaving a second worker to overlap.
+Stage timings and source counts/sizes are logged without logging questions,
+conversation text or credentials. Provider timeouts are reported explicitly and
+failed exchanges are not saved as successful conversation turns.
+
 ### Order eligibility and answer coverage
 
 Order-scoped questions include the requested Order's rule page, not just

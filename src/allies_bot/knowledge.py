@@ -1,7 +1,11 @@
 import hashlib
+import logging
+import math
 import re
+import time
 import uuid
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TypeVar
@@ -27,6 +31,17 @@ from qdrant_client.models import (
 from allies_bot.config import Settings
 
 VECTOR_SIZE = 1536
+ANSWER_BUDGET_SECONDS = 120
+answer_deadline: ContextVar[float | None] = ContextVar("answer_deadline", default=None)
+logger = logging.getLogger(__name__)
+
+
+def request_timeout(stage: str, maximum: float) -> float:
+    deadline = answer_deadline.get()
+    remaining = maximum if deadline is None else min(maximum, deadline - time.monotonic())
+    if remaining <= 0:
+        raise TimeoutError(f"Answer deadline exceeded before {stage}.")
+    return remaining
 EMBEDDING_BATCH_SIZE = 128
 QDRANT_UPSERT_BATCH_SIZE = 64
 CONVERSATION_MEMORY_LIMIT = 8
@@ -185,8 +200,10 @@ def batched(items: list[Item], batch_size: int) -> Iterator[list[Item]]:
 class KnowledgeBase:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.openai = OpenAI(api_key=settings.openai_api_key)
-        self.qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        self.openai = OpenAI(api_key=settings.openai_api_key, timeout=60, max_retries=0)
+        self.qdrant = QdrantClient(
+            url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=10,
+        )
         self.collection_ready = False
         self.memory_collection_ready = False
 
@@ -326,6 +343,8 @@ class KnowledgeBase:
             return question
         result = self.openai.chat.completions.create(
             model=self.settings.chat_model,
+            timeout=request_timeout("follow-up resolution", 15),
+            max_completion_tokens=512,
             messages=[
                 {"role": "system", "content": (
                     "Rewrite the latest user question as a standalone retrieval question. "
@@ -341,6 +360,8 @@ class KnowledgeBase:
             ],
         )
         resolved = result.choices[0].message.content
+        if result.choices[0].finish_reason == "length":
+            raise ValueError("Follow-up resolution exceeded its output limit.")
         if not resolved or not resolved.strip():
             raise ValueError("Could not resolve the follow-up question from conversation history.")
         return resolved.strip()
@@ -457,12 +478,14 @@ class KnowledgeBase:
     ) -> list[dict[str, str | None]]:
         self.ensure_collection()
         vector = self.openai.embeddings.create(
-            model=self.settings.embedding_model, input=question
+            model=self.settings.embedding_model, input=question,
+            timeout=request_timeout("embedding", 15),
         ).data[0].embedding
         result = self.qdrant.query_points(
             collection_name=self.settings.qdrant_collection,
             query=vector,
             limit=limit,
+            timeout=math.ceil(request_timeout("semantic retrieval", 10)),
         )
         semantic: list[dict[str, str | None]] = []
         seen: set[str] = set()
@@ -482,6 +505,7 @@ class KnowledgeBase:
                 should=[FieldCondition(key="text", match=MatchText(text=term)) for term in terms]
             ),
             limit=KEYWORD_RESULT_LIMIT,
+            timeout=math.ceil(request_timeout("keyword retrieval", 10)),
         )
         keyword_sources: dict[str, dict[str, str | None]] = {}
         for point in keyword_result.points:
@@ -525,6 +549,7 @@ class KnowledgeBase:
                     ),
                     limit=DIRECT_RULE_SCAN_LIMIT, offset=offset,
                     with_payload=True, with_vectors=False,
+                    timeout=math.ceil(request_timeout("damage-rule retrieval", 10)),
                 )
                 for point in candidates:
                     source = point.payload
@@ -563,6 +588,7 @@ class KnowledgeBase:
                     FieldCondition(key="source_label", match=MatchValue(value=label)),
                 ]),
                 limit=256, offset=offset, with_payload=True, with_vectors=False,
+                timeout=math.ceil(request_timeout("source-page retrieval", 10)),
             )
             sources.extend(record.payload for record in records)
             if offset is None:
@@ -704,8 +730,21 @@ class KnowledgeBase:
     def answer(
         self, question: str, history: list[ConversationMessage] | None = None
     ) -> tuple[str, list[dict[str, str | None]]]:
+        token = answer_deadline.set(time.monotonic() + ANSWER_BUDGET_SECONDS)
+        started = time.monotonic()
+        try:
+            return self._answer(question, history)
+        finally:
+            logger.info("Answer finished elapsed_seconds=%.3f", time.monotonic() - started)
+            answer_deadline.reset(token)
+
+    def _answer(
+        self, question: str, history: list[ConversationMessage] | None = None,
+    ) -> tuple[str, list[dict[str, str | None]]]:
         history = history or []
+        started = time.monotonic()
         retrieval_query = self.standalone_question(question, history)
+        logger.info("Follow-up resolution elapsed_seconds=%.3f", time.monotonic() - started)
         character_creation = self.is_character_creation_question(retrieval_query)
         minstrel_question = self.is_minstrel_question(retrieval_query)
         intent = retrieval_query
@@ -716,7 +755,11 @@ class KnowledgeBase:
                 + ("Songs Song Families" if minstrel_question else "Spiritual Effects different Families")
                 + " Progression 1 Order eligibility learn"
             )
+        started = time.monotonic()
         sources = self.search(retrieval_query, exclude_enemy=not explicit_enemy_request)
+        logger.info("Search elapsed_seconds=%.3f sources=%d",
+                    time.monotonic() - started, len(sources))
+        started = time.monotonic()
         # Resolve explicit level requests even if the page was absent from top-k results.
         minion = re.search(r"\bminions?\s+level\s*:?\s*(\d+)\b", intent, re.IGNORECASE)
         labels = {str(source.get("source_label") or "") for source in sources}
@@ -763,6 +806,8 @@ class KnowledgeBase:
             )
             if stats is not None:
                 return stats, sources
+        logger.info("Source expansion elapsed_seconds=%.3f sources=%d",
+                    time.monotonic() - started, len(sources))
         context = "\n\n".join(
             f"Source: {source['source_label']}\n{source['text']}" for source in sources
         )
@@ -776,8 +821,12 @@ class KnowledgeBase:
                 "\n\nNamed-source table coverage checklist (not additional rules):\n"
                 + "\n".join(f"- {group}" for group in table_groups)
             )
+        logger.info("Generating answer source_chars=%d history_messages=%d",
+                    len(context), len(history))
+        started = time.monotonic()
         completion = self.openai.chat.completions.create(
             model=self.settings.chat_model,
+            timeout=request_timeout("answer generation", 75),
             messages=[
                 {
                     "role": "system",
@@ -864,4 +913,5 @@ class KnowledgeBase:
                 },
             ],
         )
+        logger.info("Generation elapsed_seconds=%.3f", time.monotonic() - started)
         return completion.choices[0].message.content or "No answer was generated.", sources

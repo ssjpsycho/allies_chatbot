@@ -1,17 +1,20 @@
 import asyncio
 import logging
+import time
 from weakref import WeakValueDictionary
 
 import discord
 from discord import app_commands
+from openai import APITimeoutError
 
 from allies_bot.config import Settings
-from allies_bot.knowledge import KnowledgeBase
+from allies_bot.knowledge import ANSWER_BUDGET_SECONDS, KnowledgeBase
 from allies_bot.messages import plain_text_for_discord, split_for_discord
 
 logger = logging.getLogger(__name__)
 BACKEND_TIMEOUT_SECONDS = 90
 MEMORY_WRITE_TIMEOUT_SECONDS = 15
+ANSWER_PROGRESS_SECONDS = 20
 
 
 class AlliesBot(discord.Client):
@@ -73,14 +76,24 @@ async def answer_question(
         return
 
     try:
-        answer, sources = await asyncio.wait_for(
-            asyncio.to_thread(bot.knowledge.answer, question, history),
-            timeout=BACKEND_TIMEOUT_SECONDS,
-        )
-    except TimeoutError:
+        started = time.monotonic()
+        worker = asyncio.create_task(asyncio.to_thread(bot.knowledge.answer, question, history))
+        done, _ = await asyncio.wait({worker}, timeout=ANSWER_PROGRESS_SECONDS)
+        if not done:
+            await interaction.followup.send(
+                "I am still checking the rules and preparing your answer. "
+                "You do not need to submit the question again."
+            )
+        # Keep the conversation lock until the worker ends. wait_for(to_thread(...))
+        # only cancels the waiter, leaving a timed-out worker running in the background.
+        answer, sources = await worker
+        logger.info("Discord answer elapsed_seconds=%.3f budget_seconds=%d",
+                    time.monotonic() - started, ANSWER_BUDGET_SECONDS)
+    except (TimeoutError, APITimeoutError):
         logger.exception("Timed out while answering Discord question")
         await interaction.followup.send(
-            "I am taking too long to reach the knowledge service. Please try again shortly."
+            "The knowledge service timed out while preparing your answer. "
+            "This exchange was not saved; please try again shortly."
         )
         return
     except Exception:

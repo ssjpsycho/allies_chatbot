@@ -65,7 +65,7 @@ def test_followup_resolves_reference_before_search_and_scope_detection():
 
     def complete(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(
             content=resolved if len(calls) == 1 else "It costs 3.",
         ))])
 
@@ -88,7 +88,7 @@ def test_followup_resolves_reference_before_search_and_scope_detection():
 def test_new_topic_does_not_inherit_stale_minion_or_order_intent():
     kb = memory()
     kb.openai = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
-        create=lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(
+        create=lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop",
             message=SimpleNamespace(content="What does Holy Manna cost?"),
         )]),
     )))
@@ -101,7 +101,7 @@ def test_new_topic_does_not_inherit_stale_minion_or_order_intent():
 def test_empty_followup_rewrite_fails_explicitly():
     kb = memory()
     kb.openai = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
-        create=lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(
+        create=lambda **kwargs: SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop",
             message=SimpleNamespace(content=None),
         )]),
     )))

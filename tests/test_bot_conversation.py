@@ -113,3 +113,41 @@ def test_simultaneous_questions_from_same_user_are_serialized(bot_module, monkey
     asyncio.run(run())
     assert peak == 1
     assert completed == ["First", "Second"]
+
+
+def test_slow_answer_shows_progress_then_delivers_and_saves(bot_module, monkeypatch):
+    import time
+
+    module = bot_module
+    monkeypatch.setattr(module, "ANSWER_PROGRESS_SECONDS", 0.001)
+    module.bot.knowledge.load_conversation = lambda key: []
+    saved = []
+
+    def answer(*args):
+        time.sleep(0.02)
+        return "Completed answer", []
+
+    module.bot.knowledge.answer = answer
+    module.bot.knowledge.save_conversation_turn = lambda *args: saved.append(args)
+    request = interaction()
+    asyncio.run(module.ask.callback(request, "Question"))
+    messages = [call.args[0] for call in request.followup.send.call_args_list]
+    assert "still checking" in messages[0]
+    assert "Completed answer" in messages[1]
+    assert saved == [("10:20:30", "Question", "Completed answer")]
+
+
+def test_timed_out_answer_reports_failure_without_saving(bot_module):
+    module = bot_module
+    module.bot.knowledge.load_conversation = lambda key: []
+    saved = []
+    module.bot.knowledge.save_conversation_turn = lambda *args: saved.append(args)
+
+    def answer(*args):
+        raise TimeoutError("Answer deadline exceeded")
+
+    module.bot.knowledge.answer = answer
+    request = interaction()
+    asyncio.run(module.ask.callback(request, "Question"))
+    assert "timed out" in request.followup.send.call_args.args[0]
+    assert not saved

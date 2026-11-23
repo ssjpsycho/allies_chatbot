@@ -1,0 +1,52 @@
+name: Keep Qdrant active
+
+on:
+  schedule:
+    - cron: "43 9 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read collection point count
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_COLLECTION: ${{ vars.QDRANT_COLLECTION || 'allies_of_majesty' }}
+        run: |
+          python3 - <<'PY'
+          import http.client
+          import json
+          import os
+          from urllib.parse import quote, urlsplit
+
+          base = urlsplit(os.environ["QDRANT_URL"])
+          key = os.environ["QDRANT_API_KEY"]
+          collection = os.environ["QDRANT_COLLECTION"]
+          if (base.scheme != "https" or not base.hostname or base.username
+                  or base.password or base.query or base.fragment or not key or not collection):
+              raise ValueError("Qdrant URL, API key, or collection is invalid.")
+
+          path = f"{base.path.rstrip('/')}/collections/{quote(collection, safe='')}/points/count"
+          connection = http.client.HTTPSConnection(base.hostname, base.port, timeout=20)
+          try:
+              connection.request(
+                  "POST", path, body=b'{"exact":false}',
+                  headers={"api-key": key, "Content-Type": "application/json"},
+              )
+              response = connection.getresponse()
+              body = response.read()
+              if response.status != 200:
+                  raise RuntimeError(f"Qdrant count request failed with HTTP {response.status}.")
+              data = json.loads(body)
+              count = data.get("result", {}).get("count")
+              if data.get("status") != "ok" or type(count) is not int or count < 0:
+                  raise ValueError("Qdrant returned an invalid point-count response.")
+              print(f"Authenticated collection count succeeded: {count} points.")
+          finally:
+              connection.close()
+          PY

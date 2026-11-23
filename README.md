@@ -402,6 +402,24 @@ writing and use the same private backups, concurrency and saved-content checks.
 
 ## 5. Automatic daily wiki sync
 
+### Qdrant activity request
+
+The separate `Keep Qdrant active` GitHub Actions workflow runs daily at 09:43 UTC
+and can also be started manually. It makes an authenticated, read-only approximate
+point-count request against the configured knowledge collection; it does not embed,
+re-index, change data, or depend on the bot being used. It uses the existing
+`QDRANT_URL` and `QDRANT_API_KEY` repository secrets. Set the optional
+`QDRANT_COLLECTION` repository variable if the collection is not
+`allies_of_majesty`. Check the workflow run history for failures.
+
+Qdrant states that free clusters are suspended after one week without use and
+can be deleted after four weeks of inactivity. Its public documentation does not
+specify whether this count request resets the inactivity timer, so monitor the
+cluster's status rather than assuming it does. If already suspended, reactivate
+it in the Qdrant Cloud console before running the workflow. GitHub scheduled
+workflows may be delayed or disabled after repository inactivity, so they are not
+an uptime guarantee. A paid Qdrant cluster is not suspended for inactivity.
+
 The repository includes a GitHub Actions workflow at `.github/workflows/wiki-sync.yml`. It runs daily at 03:17 UTC and can also be started manually from the GitHub **Actions** tab. It checks BookStack page metadata first; if nothing changed, it exits without embedding or committing anything. If the wiki changed, it updates Qdrant, commits `.wiki-sync-state.json`, and pushes to `main`, which triggers Railway's GitHub deployment.
 
 Add these GitHub repository secrets under **Settings > Secrets and variables > Actions**:
